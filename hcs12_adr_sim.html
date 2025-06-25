@@ -9,8 +9,8 @@
         <style>
             body {
                 font-family: "Inter", sans-serif;
-                background-color: #111827;
-                color: #d1d5db;
+                background-color: #111827; /* Gray 900 */
+                color: #d1d5db; /* Gray 300 */
             }
             .mono {
                 font-family: "Roboto Mono", monospace;
@@ -18,33 +18,34 @@
             .memory-item,
             .register-item {
                 transition: all 0.3s ease-in-out;
-                border: 1px solid #374151;
+                border: 1px solid #374151; /* Gray 700 */
             }
             .register-item:hover,
             .memory-item-value:hover {
-                background-color: #1f2937;
+                background-color: #1f2937; /* Gray 800 */
                 cursor: pointer;
             }
 
             /* Highlighting styles for visual feedback */
             .highlight-change {
-                background-color: #a16207 !important;
-                border-color: #ca8a04 !important;
-                color: #fefce8 !important;
+                background-color: #a16207 !important; /* Yellow 700 */
+                border-color: #ca8a04 !important; /* Yellow 600 */
+                color: #fefce8 !important; /* Yellow 50 */
+                transform: scale(1.05);
             }
             .highlight-pc {
-                background-color: #15803d;
+                background-color: #15803d; /* Green 700 */
             }
             .highlight-sp {
-                background-color: #581c87;
+                background-color: #581c87; /* Purple 900 */
             }
             .highlight-pointer-addr {
-                background-color: #4338ca;
-                border-color: #4f46e5;
+                background-color: #4338ca; /* Indigo 700 */
+                border-color: #4f46e5; /* Indigo 600 */
             }
             .highlight-effective-addr {
-                background-color: #be123c;
-                border-color: #e11d48;
+                background-color: #be123c; /* Rose 700 */
+                border-color: #e11d48; /* Rose 600 */
             }
 
             .pointer-text {
@@ -91,7 +92,8 @@
                 white-space: nowrap;
                 opacity: 0;
                 animation: fadeInOut 5s forwards;
-                transform: translate(-50%, -50%);
+                transform: translate(-50%, -120%);
+                z-index: 11;
             }
             .annotation-arrow {
                 position: absolute;
@@ -99,6 +101,7 @@
                 animation: fadeInOut 5s forwards;
                 stroke-width: 2;
                 fill: #f59e0b;
+                z-index: 10;
             }
             @keyframes fadeInOut {
                 0% {
@@ -325,9 +328,11 @@
                         this.memory[i] = (seed >> 24) & 0xff;
                     }
                     this.registers = { A: 0xaa, B: 0xbb, X: 0x1000, Y: 0x2000, SP: 0x0fff, PC: 0x0100, CCR: { S: 1, X: 0, H: 0, I: 1, N: 0, Z: 0, V: 0, C: 0 } };
-                    this.writeMem(0x2000, 0x3d);
+                    this.writeMem(0x0030, 0xbe);
                     this.writeMem16(0x1010, 0x3000); // For LDAA [$10,X]
-                    this.writeMem16(0x20aa, 0x4000); // For LDD [D,Y]
+                    this.writeMem16(0x3000, 0xcafe); // Value for LDAA [$10,X]
+                    this.writeMem16(0x20bb, 0x4000); // For LDD [D,Y] where D=AABB, Y=2000
+                    this.writeMem16(0x4000, 0xbeef); // Value for LDD [D,Y]
                     this.changed = { regs: new Set(), mem: new Set() };
                 }
                 readMem(a) {
@@ -361,9 +366,9 @@
                     return v;
                 }
                 pull16() {
-                    const l = this.pull();
-                    const h = this.pull();
-                    return (h << 8) | l;
+                    const highByte = this.pull();
+                    const lowByte = this.pull();
+                    return (highByte << 8) | lowByte;
                 }
                 ccr_update_NZV0(v, s) {
                     this.updateNZ(v, s);
@@ -383,7 +388,7 @@
                 ccr_update_SUB(v1, v2, res, s) {
                     this.updateNZ(res, s);
                     this.updateV_sub(v1, v2, res, s);
-                    this.updateC_sub(v1, v2);
+                    this.updateC_sub(v1, v2, s);
                 }
                 ccr_update_TAP(v) {
                     Object.keys(this.registers.CCR).forEach((f, i) => (this.registers.CCR[f] = v & (1 << i) ? 1 : 0));
@@ -402,8 +407,9 @@
                     const m = s === 16 ? 0x8000 : 0x80;
                     this.registers.CCR.V = (v1 & m && !(v2 & m) && !(r & m)) || (!(v1 & m) && v2 & m && r & m) ? 1 : 0;
                 }
-                updateC_sub(v1, v2) {
-                    this.registers.CCR.C = v1 < v2 ? 1 : 0;
+                updateC_sub(v1, v2, s = 8) {
+                    const m = s === 16 ? 0x10000 : 0x100;
+                    this.registers.CCR.C = (v1 & (m - 1)) < (v2 & (m - 1)) ? 1 : 0;
                 }
 
                 initInstructionSet() {
@@ -414,48 +420,29 @@
                         LDD: { h: this.executeLoad, v: MI, s: 16, r: "D", c: this.ccr_update_NZV0 },
                         LDAA: { h: this.executeLoad, v: MI, s: 8, r: "A", c: this.ccr_update_NZV0 },
                         LDAB: { h: this.executeLoad, v: MI, s: 8, r: "B", c: this.ccr_update_NZV0 },
-                        LDX: { h: this.executeLoad, v: MI, s: 16, r: "X", c: this.ccr_update_NZV0 },
-                        LDY: { h: this.executeLoad, v: MI, s: 16, r: "Y", c: this.ccr_update_NZV0 },
-                        LDS: { h: this.executeLoad, v: MI, s: 16, r: "SP", c: this.ccr_update_NZV0 },
+                        LDX: { h: this.executeLoad, v: MI, s: 16, r: "X", c: this.ccr_update_Z_only },
+                        LDY: { h: this.executeLoad, v: MI, s: 16, r: "Y", c: this.ccr_update_Z_only },
+                        LDS: { h: this.executeLoad, v: MI, s: 16, r: "SP", c: this.ccr_update_Z_only },
                         STAA: { h: this.executeStore, v: M_NOIMM, s: 8, r: "A", c: this.ccr_update_NZV0 },
                         STAB: { h: this.executeStore, v: M_NOIMM, s: 8, r: "B", c: this.ccr_update_NZV0 },
                         STD: { h: this.executeStore, v: M_NOIMM, s: 16, r: "D", c: this.ccr_update_NZV0 },
                         STX: { h: this.executeStore, v: M_NOIMM, s: 16, r: "X", c: this.ccr_update_NZV0 },
                         STY: { h: this.executeStore, v: M_NOIMM, s: 16, r: "Y", c: this.ccr_update_NZV0 },
                         STS: { h: this.executeStore, v: M_NOIMM, s: 16, r: "SP", c: this.ccr_update_NZV0 },
-                        DEC: { h: this.executeMemoryOp, op: (v) => v - 1, v: M_NOIMM, s: 8, c: this.ccr_update_NZV_DEC },
-                        DECA: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "A", c: this.ccr_update_NZV_DEC },
-                        DECB: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "B", c: this.ccr_update_NZV_DEC },
-                        DEX: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "X", c: this.ccr_update_Z_only },
-                        DEY: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "Y", c: this.ccr_update_Z_only },
-                        INC: { h: this.executeMemoryOp, op: (v) => v + 1, v: M_NOIMM, s: 8, c: this.ccr_update_NZV_INC },
-                        INCA: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "A", c: this.ccr_update_NZV_INC },
-                        INCB: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "B", c: this.ccr_update_NZV_INC },
-                        INX: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "X", c: this.ccr_update_Z_only },
-                        INY: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "Y", c: this.ccr_update_Z_only },
+                        DECA: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "A", s: 8, c: this.ccr_update_NZV_DEC },
+                        DECB: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "B", s: 8, c: this.ccr_update_NZV_DEC },
+                        DEX: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "X", s: 16, c: this.ccr_update_Z_only },
+                        DEY: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "Y", s: 16, c: this.ccr_update_Z_only },
+                        INCA: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "A", s: 8, c: this.ccr_update_NZV_INC },
+                        INCB: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "B", s: 8, c: this.ccr_update_NZV_INC },
+                        INX: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "X", s: 16, c: this.ccr_update_Z_only },
+                        INY: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "Y", s: 16, c: this.ccr_update_Z_only },
                         LEAS: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "SP", c: this.ccr_update_None },
                         LEAX: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "X", c: this.ccr_update_Z_only },
                         LEAY: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "Y", c: this.ccr_update_Z_only },
-                        MOVB: { h: this.executeMove, v: ["MEM_TO_MEM", "IMM_TO_MEM"], s: 8, c: this.ccr_update_NZV0 },
-                        PSHA: { h: this.executePush, v: ["INH"], s: 8, r: "A", c: this.ccr_update_None },
-                        PSHB: { h: this.executePush, v: ["INH"], s: 8, r: "B", c: this.ccr_update_None },
-                        PSHC: { h: this.executePush, v: ["INH"], s: 8, r: "CCR", c: this.ccr_update_None },
                         PSHD: { h: this.executePush, v: ["INH"], s: 16, r: "D", c: this.ccr_update_None },
-                        PSHX: { h: this.executePush, v: ["INH"], s: 16, r: "X", c: this.ccr_update_None },
-                        PSHY: { h: this.executePush, v: ["INH"], s: 16, r: "Y", c: this.ccr_update_None },
-                        PULA: { h: this.executePull, v: ["INH"], s: 8, r: "A", c: this.ccr_update_None },
-                        PULB: { h: this.executePull, v: ["INH"], s: 8, r: "B", c: this.ccr_update_None },
-                        PULC: { h: this.executePull, v: ["INH"], s: 8, r: "CCR", c: this.ccr_update_PULC },
                         PULD: { h: this.executePull, v: ["INH"], s: 16, r: "D", c: this.ccr_update_None },
-                        PULX: { h: this.executePull, v: ["INH"], s: 16, r: "X", c: this.ccr_update_None },
-                        PULY: { h: this.executePull, v: ["INH"], s: 16, r: "Y", c: this.ccr_update_None },
                         SUBD: { h: this.executeSubtract, v: MI, s: 16, r: "D", c: this.ccr_update_SUB },
-                        SUBA: { h: this.executeSubtract, v: MI, s: 8, r: "A", c: this.ccr_update_SUB },
-                        SUBB: { h: this.executeSubtract, v: MI, s: 8, r: "B", c: this.ccr_update_SUB },
-                        TAB: { h: this.executeTransfer, v: ["INH"], src: "A", dst: "B", c: this.ccr_update_NZV0 },
-                        TBA: { h: this.executeTransfer, v: ["INH"], src: "B", dst: "A", c: this.ccr_update_NZV0 },
-                        TAP: { h: this.executeTransfer, v: ["INH"], src: "A", dst: "CCR", c: this.ccr_update_TAP },
-                        TPA: { h: this.executeTransfer, v: ["INH"], src: "CCR", dst: "A", c: this.ccr_update_None },
                         TFR: { h: this.executeTransfer, v: ["REG_TO_REG"], c: this.ccr_update_None },
                         JSR: {
                             h: (ctx) => {
@@ -496,23 +483,20 @@
                     return `Stored 0x${v.toString(16)} to $${ea.toString(16)}`;
                 }
                 executeRegisterOp(ctx) {
-                    const r = ctx.spec.r,
-                        i = r === "D" ? this.D : this.registers[r],
-                        res = ctx.spec.op(i);
-                    if (r === "D") this.D = res;
-                    else this.registers[r] = res & 0xffff;
-                    ctx.spec.c.call(this, this.registers[r]);
+                    const r = ctx.spec.r;
+                    const i = r === "D" ? this.D : this.registers[r];
+                    const res = ctx.spec.op(i);
+                    if (r === "D") {
+                        this.D = res;
+                    } else {
+                        this.registers[r] = res & (ctx.spec.s === 16 ? 0xffff : 0xff);
+                    }
+                    ctx.spec.c.call(this, r === "D" ? this.D : this.registers[r], ctx.spec.s);
                     this.changed.regs.add(r);
-                    if (r === "A" || r === "B") this.changed.regs.add("D");
+                    if (r === "D" || r === "A" || r === "B") {
+                        this.changed.regs.add("A").add("B").add("D");
+                    }
                     return `${ctx.mnemonic} on ${r}`;
-                }
-                executeMemoryOp(ctx) {
-                    const ea = this.getEffectiveAddress(ctx.operand),
-                        i = this.readMem(ea),
-                        res = ctx.spec.op(i) & 0xff;
-                    this.writeMem(ea, res);
-                    ctx.spec.c.call(this, res);
-                    return `${ctx.mnemonic} on memory at $${ea.toString(16)}`;
                 }
                 executeLea(ctx) {
                     const ea = this.getEffectiveAddress(ctx.operand);
@@ -522,12 +506,7 @@
                     return `Loaded EA $${ea.toString(16)} into ${ctx.spec.r}`;
                 }
                 executePush(ctx) {
-                    let v;
-                    if (ctx.spec.r === "CCR") {
-                        v = this.getCCRValue();
-                    } else {
-                        v = ctx.spec.r === "D" ? this.D : this.registers[ctx.spec.r];
-                    }
+                    const v = ctx.spec.r === "D" ? this.D : this.registers[ctx.spec.r];
                     if (ctx.spec.s === 16) this.push16(v);
                     else this.push(v);
                     return `Pushed ${ctx.spec.r} (0x${v.toString(16)}) to stack`;
@@ -535,11 +514,9 @@
                 executePull(ctx) {
                     const v = ctx.spec.s === 16 ? this.pull16() : this.pull();
                     if (ctx.spec.r === "D") this.D = v;
-                    else if (ctx.spec.r === "CCR") ctx.spec.c.call(this, v);
                     else this.registers[ctx.spec.r] = v;
                     this.changed.regs.add(ctx.spec.r);
                     if (ctx.spec.r === "D") this.changed.regs.add("A").add("B");
-                    if (ctx.spec.r === "CCR") Object.keys(this.registers.CCR).forEach((f) => this.changed.regs.add(f));
                     return `Pulled 0x${v.toString(16)} into ${ctx.spec.r}`;
                 }
                 executeSubtract(ctx) {
@@ -548,66 +525,49 @@
                     const res = v1 - v2;
                     if (ctx.spec.r === "D") this.D = res;
                     else this.registers[ctx.spec.r] = res;
-                    ctx.spec.c.call(this, v1, v2, res & 0xffff, ctx.spec.s);
+                    ctx.spec.c.call(this, v1, v2, res, ctx.spec.s);
                     this.changed.regs.add(ctx.spec.r);
                     if (ctx.spec.r === "D") this.changed.regs.add("A").add("B");
                     return `${ctx.mnemonic}: ${v1.toString(16)} - ${v2.toString(16)} = ${res & (ctx.spec.s === 16 ? 0xffff : 0xff).toString(16)}`;
                 }
                 executeTransfer(ctx) {
-                    const sr = ctx.operand.src || ctx.spec.src,
-                        dr = ctx.operand.dst || ctx.spec.dst,
-                        sv = sr === "CCR" ? this.getCCRValue() : sr === "D" ? this.D : this.registers[sr];
-                    if (dr === "CCR") {
-                        ctx.spec.c.call(this, sv);
-                    } else if (dr === "D") {
+                    const sr = ctx.operand.src;
+                    const dr = ctx.operand.dst;
+                    const s_is_16 = ["D", "X", "Y", "SP"].includes(sr);
+                    const d_is_16 = ["D", "X", "Y", "SP"].includes(dr);
+                    if (s_is_16 !== d_is_16 && sr !== "CCR" && dr !== "CCR") {
+                        throw new Error(`Transfer size mismatch between ${sr} and ${dr}`);
+                    }
+                    const sv = sr === "D" ? this.D : this.registers[sr];
+                    if (dr === "D") {
                         this.D = sv;
                     } else {
-                        this.registers[dr] = sv & 0xffff;
+                        this.registers[dr] = sv;
                     }
                     this.changed.regs.add(dr);
-                    if (dr === "D" || dr === "A" || dr === "B") this.changed.regs.add("A").add("B").add("D");
-                    if (dr === "CCR") Object.keys(this.registers.CCR).forEach((f) => this.changed.regs.add(f));
+                    if (dr === "D") {
+                        this.changed.regs.add("A").add("B");
+                    }
                     return `Transferred ${sr} to ${dr}`;
-                }
-                getCCRValue() {
-                    let v = 0;
-                    if (this.registers.CCR.S) v |= 128;
-                    if (this.registers.CCR.X) v |= 64;
-                    if (this.registers.CCR.H) v |= 32;
-                    if (this.registers.CCR.I) v |= 16;
-                    if (this.registers.CCR.N) v |= 8;
-                    if (this.registers.CCR.Z) v |= 4;
-                    if (this.registers.CCR.V) v |= 2;
-                    if (this.registers.CCR.C) v |= 1;
-                    return v;
-                }
-                executeMove(ctx) {
-                    const sv = this.getValue(ctx.operand.src, ctx.spec.s).value;
-                    const de = this.getEffectiveAddress(ctx.operand.dst);
-                    this.writeMem(de, sv);
-                    ctx.spec.c.call(this, sv, ctx.spec.s);
-                    return `Moved 0x${sv.toString(16)} to $${de.toString(16)}`;
                 }
                 parseOperand(m, s) {
                     s = s.trim().toUpperCase();
                     const p = s.split(",").map((s) => s.trim());
                     if (p.length === 2) {
                         if (m === "TFR") return { mode: "REG_TO_REG", src: p[0], dst: p[1] };
-                        if (m === "MOVB") return { mode: "MEM_TO_MEM", src: this.parseSingleOperand(p[0]), dst: this.parseSingleOperand(p[1]) };
                     }
                     return this.parseSingleOperand(s);
                 }
                 parseSingleOperand(s) {
                     let m;
                     if (s === "") return { mode: "INH" };
-                    m = s.match(/^\[\s*(\$?([0-9A-F]+)|[D])\s*,\s*([XYSP]{1,2})\s*\]$/);
+                    m = s.match(/^\[\s*(\$?([0-9A-F]+)|D)\s*,\s*([XYSP]{1,2})\s*\]$/);
                     if (m) {
                         const o = m[1],
                             r = m[3],
-                            b = this.registers[r];
-                        let v,
+                            b = this.registers[r],
                             a = o === "D";
-                        v = a ? this.D : parseInt(o.replace("$", ""), 16);
+                        const v = a ? this.D : parseInt(o.replace("$", ""), 16);
                         const p = (b + v) & 0xffff;
                         return { mode: "IDX_INDIRECT", address: this.readMem16(p), reg: r, ptr_addr: p, offset: v, offsetAcc: a ? "D" : null };
                     }
@@ -660,15 +620,16 @@
                 }
                 step(i) {
                     this.changed = { regs: new Set(), mem: new Set() };
-                    const p = i.trim().split(/\s+/),
-                        m = p[0].toUpperCase(),
-                        os = p.slice(1).join(" ");
+                    const p = i.trim().split(/\s+/);
+                    const m = p[0].toUpperCase();
+                    const os = p.slice(1).join(" ");
                     try {
                         const c = this.instructionSet[m];
                         if (!c) throw new Error(`Unknown mnemonic: ${m}`);
                         const o = this.parseOperand(m, os);
                         if (o.mode === "INVALID") throw new Error(o.error);
                         if (!c.v.some((v) => o.mode.startsWith(v))) throw new Error(`Invalid mode '${o.mode}' for ${m}`);
+
                         if (o.pre) {
                             if (o.pre === "+") this.registers[o.reg] = (this.registers[o.reg] + o.val) & 0xffff;
                             if (o.pre === "-") this.registers[o.reg] = (this.registers[o.reg] - o.val) & 0xffff;
@@ -680,7 +641,7 @@
                             if (o.post === "-") this.registers[o.reg] = (this.registers[o.reg] - o.val) & 0xffff;
                             this.changed.regs.add(o.reg);
                         }
-                        return { success: true, log: l, operand: o };
+                        return { success: true, log: l, operand: o, spec: c };
                     } catch (e) {
                         return { success: false, log: e.message };
                     }
@@ -734,7 +695,7 @@
                         if (m.c) {
                             const c = cpu.registers.CCR,
                                 f = ["S", "X", "H", "I", "N", "Z", "V", "C"],
-                                v = f.map((fl) => `<span class="${c[fl] ? "text-green-400" : "text-gray-500"}">${fl}</span>`).join("");
+                                v = f.map((fl) => `<span class="${c[fl] ? "text-green-400 font-bold" : "text-gray-500"}">${fl}</span>`).join("");
                             w.innerHTML = `<div class="flex items-center gap-2"><span class="font-bold w-6">${rn}</span><span class="text-xs text-gray-400">${m.n}</span></div><div class="mono text-lg flex gap-1.5">${v}</div>`;
                         } else {
                             const v = m.v ? cpu.D : cpu.registers[rn],
@@ -772,7 +733,7 @@
                         for (let c = 0; c < 8; c++) {
                             const ad = b + c,
                                 vc = document.createElement("div");
-                            vc.className = "memory-item-value text-center py-1 rounded-sm border border-gray-700";
+                            vc.className = "memory-item-value text-center py-1 rounded-sm border border-gray-700 bg-gray-900/50";
                             vc.id = `mem-${ad}-${view.id}`;
                             vc.textContent = cpu.readMem(ad).toString(16).toUpperCase().padStart(2, "0");
                             if (cpu.changed.mem.has(ad)) vc.classList.add("highlight-change");
@@ -791,13 +752,13 @@
                         const v = cpu.readMem(a),
                             t = a === sp,
                             it = document.createElement("div");
-                        it.className = `flex justify-between items-center relative ${t ? "bg-purple-900/50 rounded-l-md" : ""}`;
+                        it.className = `flex justify-between items-center relative p-1 ${t ? "bg-purple-900/50 rounded-l-md" : ""}`;
                         it.innerHTML = `<span class="text-gray-500">$${a.toString(16).toUpperCase().padStart(4, "0")}:</span><span>${v.toString(16).toUpperCase().padStart(2, "0")}</span>${
                             t ? '<span class="pointer-text text-purple-400 text-lg">&larr; SP</span>' : ""
                         }`;
                         ui.stack.insertBefore(it, ui.stack.firstChild);
                     }
-                    ui.stackDown.disabled = sp + stackOffset >= 0x0fff;
+                    ui.stackDown.disabled = sp + stackOffset >= 0xffff;
                 }
                 function updateUI() {
                     renderRegisters();
@@ -808,6 +769,7 @@
                 function clearHighlights() {
                     document.querySelectorAll(".highlight-change,.highlight-pointer-addr,.highlight-effective-addr").forEach((e) => e.classList.remove("highlight-change", "highlight-pointer-addr", "highlight-effective-addr"));
                 }
+
                 function createAnnotation(text, element) {
                     if (!element) return;
                     const r = element.getBoundingClientRect(),
@@ -815,7 +777,7 @@
                     a.className = "annotation-text";
                     a.textContent = text;
                     a.style.left = `${r.left + window.scrollX + r.width / 2}px`;
-                    a.style.top = `${r.top + window.scrollY - 20}px`;
+                    a.style.top = `${r.top + window.scrollY}px`;
                     ui.anno.appendChild(a);
                     setTimeout(() => a.remove(), 5000);
                 }
@@ -823,12 +785,15 @@
                     if (!f || !t) return;
                     const fr = f.getBoundingClientRect(),
                         tr = t.getBoundingClientRect();
-                    if (tr.width === 0 && tr.height === 0) return;
-                    const sx = fr.left + fr.width,
-                        sy = fr.top + fr.height / 2,
-                        ex = tr.left,
-                        ey = tr.top + tr.height / 2,
-                        svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                    if ((tr.width === 0 && tr.height === 0) || (fr.width === 0 && fr.height === 0)) return;
+
+                    const f_is_reg = f.id.startsWith("reg-");
+                    const sx = f_is_reg ? fr.left + fr.width : fr.left + fr.width / 2;
+                    const sy = fr.top + fr.height / 2;
+                    const ex = tr.left;
+                    const ey = tr.top + tr.height / 2;
+
+                    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
                     svg.className = "annotation-arrow";
                     svg.style.position = "absolute";
                     svg.style.left = 0;
@@ -837,54 +802,61 @@
                     svg.style.height = "100%";
                     svg.innerHTML = `<defs><marker id="arrowhead-${c.slice(1)}" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto" fill="${c}"><polygon points="0 0, 10 3.5, 0 7" /></marker></defs><line x1="${
                         sx + window.scrollX
-                    }" y1="${sy + window.scrollY}" x2="${ex + window.scrollX}" y2="${ey + window.scrollY}" stroke="${c}" stroke-width="2" marker-end="url(#arrowhead-${c.slice(1)})" />`;
+                    }" y1="${sy + window.scrollY}" x2="${ex + window.scrollX - 5}" y2="${ey + window.scrollY}" stroke="${c}" stroke-width="2" marker-end="url(#arrowhead-${c.slice(1)})" />`;
                     ui.anno.appendChild(svg);
                     setTimeout(() => svg.remove(), 5000);
                 }
-                function findVisibleElementById(baseId) {
-                    return document.getElementById(`${baseId}-memory-view-1`) || document.getElementById(`${baseId}-memory-view-2`);
+
+                function findElementInViews(id) {
+                    return document.getElementById(`mem-${id}-memory-view-1`) || document.getElementById(`mem-${id}-memory-view-2`);
                 }
-                function showExecutionFlow(o) {
+
+                // --- REVISED VISUALIZATION LOGIC ---
+                function showExecutionFlow(r) {
                     ui.anno.innerHTML = "";
+                    const o = r.operand;
                     if (!o || !o.mode || o.mode === "INH" || o.mode === "IMM" || o.mode === "REG_TO_REG") return;
+
+                    const highlightAndGetElement = (addr, className, size = 8) => {
+                        if (addr === undefined) return null;
+                        const el = findElementInViews(addr);
+                        if (!el) return null;
+                        el.classList.add(className);
+                        if (size === 16) {
+                            const el2 = findElementInViews(addr + 1);
+                            if (el2) el2.classList.add(className);
+                        }
+                        return el;
+                    };
+
                     setTimeout(() => {
-                        const ea = o.address || (o.dst ? o.dst.address : null);
-                        const ec = findVisibleElementById(ea);
-                        switch (o.mode) {
-                            case "IDX_INDIRECT": {
-                                const re = document.getElementById(`reg-${o.reg}`),
-                                    ae = o.offsetAcc ? document.getElementById(`reg-${o.offsetAcc}`) : null,
-                                    pc = findVisibleElementById(o.ptr_addr);
-                                createAnnotation(`Base: $${cpu.registers[o.reg].toString(16).toUpperCase()}`, re);
-                                if (ae) createAnnotation(`Offset: $${o.offset.toString(16).toUpperCase()}`, ae);
-                                if (pc) {
-                                    pc.classList.add("highlight-pointer-addr");
-                                    const p2 = findVisibleElementById(o.ptr_addr + 1);
-                                    if (p2) p2.classList.add("highlight-pointer-addr");
-                                    const pv = cpu.readMem16(o.ptr_addr);
-                                    createAnnotation(`Ptr: $${pv.toString(16).toUpperCase()}`, pc);
-                                }
-                                if (ec) {
-                                    ec.classList.add("highlight-effective-addr");
-                                    const ec2 = findVisibleElementById(ea + 1);
-                                    if (ec2) ec2.classList.add("highlight-effective-addr");
-                                    createAnnotation(`EA: $${ea.toString(16).toUpperCase()}`, ec);
-                                }
-                                if (re) createArrow(re, pc, "#60a5fa");
-                                if (ae) createArrow(ae, pc, "#60a5fa");
-                                if (pc) createArrow(pc, ec, "#f59e0b");
-                                break;
-                            }
-                            default: {
-                                const re = o.reg ? document.getElementById(`reg-${o.reg}`) : null,
-                                    ae = o.acc ? document.getElementById(`reg-${o.acc}`) : null;
-                                if (re) createArrow(re, ec);
-                                if (ae) createArrow(ae, ec);
-                                if (ec) createAnnotation(`EA: $${ea.toString(16).toUpperCase()}`, ec);
-                            }
+                        const ea = o.address;
+                        const fromRegEl = o.reg ? document.getElementById(`reg-${o.reg}`) : null;
+                        const fromAccEl = o.acc ? document.getElementById(`reg-${o.acc}`) : null;
+
+                        if (o.mode === "IDX_INDIRECT") {
+                            const fromOffsetAccEl = o.offsetAcc ? document.getElementById(`reg-${o.offsetAcc}`) : null;
+                            const ptrEl = highlightAndGetElement(o.ptr_addr, "highlight-pointer-addr", 16);
+                            const eaEl = highlightAndGetElement(ea, "highlight-effective-addr", r.spec.s);
+
+                            if (ptrEl) createAnnotation(`Ptr At: $${o.ptr_addr.toString(16).toUpperCase()}`, ptrEl);
+                            if (eaEl) createAnnotation(`EA: $${ea.toString(16).toUpperCase()}`, eaEl);
+
+                            if (fromRegEl) createArrow(fromRegEl, ptrEl, "#60a5fa");
+                            if (fromOffsetAccEl) createArrow(fromOffsetAccEl, ptrEl, "#60a5fa");
+                            if (ptrEl) createArrow(ptrEl, eaEl, "#f59e0b");
+                        } else if (ea !== undefined) {
+                            // Handles DIR, EXT, IDX_OFFSET, IDX_ACC, IDX_INCDEC
+                            const eaEl = highlightAndGetElement(ea, "highlight-effective-addr", r.spec.s);
+
+                            if (eaEl) createAnnotation(`EA: $${ea.toString(16).toUpperCase()}`, eaEl);
+
+                            if (fromRegEl) createArrow(fromRegEl, eaEl);
+                            if (fromAccEl) createArrow(fromAccEl, eaEl);
                         }
                     }, 100);
                 }
+
                 function handleExecute() {
                     const i = ui.instr.value;
                     if (!i) return;
@@ -895,10 +867,7 @@
                     if (r.success) {
                         let ta1 = null,
                             ta2 = null;
-                        if (r.operand.mode === "MEM_TO_MEM") {
-                            ta1 = r.operand.src.address;
-                            ta2 = r.operand.dst.address;
-                        } else if (r.operand.ptr_addr !== undefined) {
+                        if (r.operand.ptr_addr !== undefined) {
                             ta1 = r.operand.ptr_addr;
                             ta2 = r.operand.address;
                         } else if (r.operand.address !== undefined) {
@@ -910,8 +879,9 @@
                         if (ta2 !== null) {
                             ui.goto2.value = (ta2 & 0xfff8).toString(16).padStart(4, "0");
                         }
+
                         updateUI();
-                        showExecutionFlow(r.operand);
+                        showExecutionFlow(r); // <-- Pass the whole result object
                     }
                 }
 
@@ -935,14 +905,14 @@
                     if (e.key === "Enter") updateUI();
                 });
                 ui.examples.addEventListener("change", (e) => {
-                    if (e.target.value) ui.instr.value = e.target.value;
+                    if (e.target.value) ui.instr.value = e.target.value.split(" (")[0];
                 });
                 ui.stackUp.addEventListener("click", () => {
                     stackOffset -= 8;
                     renderStack();
                 });
                 ui.stackDown.addEventListener("click", () => {
-                    stackOffset += 8;
+                    stackOffset = Math.min(0xffff - cpu.registers.SP, stackOffset + 8);
                     renderStack();
                 });
                 function openModal(t, tg, v, s) {
@@ -989,6 +959,7 @@
                 ui.modal.addEventListener("click", (e) => {
                     if (e.target === ui.modal) closeModal();
                 });
+
                 ui.reset.click();
             });
         </script>
