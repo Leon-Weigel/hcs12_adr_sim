@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>HCS12 Interactive Workbench</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
+        <style>
+            body {
+                font-family: "Inter", sans-serif;
+                background-color: #111827;
+                color: #d1d5db;
+            }
+            .mono {
+                font-family: "Roboto Mono", monospace;
+            }
+            .memory-item,
+            .register-item {
+                transition: all 0.3s ease-in-out;
+                border: 1px solid #374151;
+            }
+            .register-item:hover,
+            .memory-item-value:hover {
+                background-color: #1f2937;
+                cursor: pointer;
+            }
+
+            /* Highlighting styles for visual feedback */
+            .highlight-change {
+                background-color: #a16207 !important;
+                border-color: #ca8a04 !important;
+                color: #fefce8 !important;
+            }
+            .highlight-pc {
+                background-color: #15803d;
+            }
+            .highlight-sp {
+                background-color: #581c87;
+            }
+            .highlight-pointer-addr {
+                background-color: #4338ca;
+                border-color: #4f46e5;
+            }
+            .highlight-effective-addr {
+                background-color: #be123c;
+                border-color: #e11d48;
+            }
+
+            .pointer-text {
+                position: absolute;
+                right: 100%;
+                top: 50%;
+                transform: translateY(-50%);
+                margin-right: 8px;
+                display: flex;
+                align-items: center;
+                height: 100%;
+                font-weight: bold;
+                color: #9ca3af;
+                font-size: 0.75rem;
+            }
+
+            .btn {
+                transition: all 0.2s ease;
+            }
+            .btn:disabled {
+                cursor: not-allowed;
+                opacity: 0.5;
+            }
+
+            #annotation-layer {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                overflow: hidden;
+                z-index: 10;
+            }
+            .annotation-text {
+                position: absolute;
+                background-color: rgba(17, 24, 39, 0.95);
+                color: #f3f4f6;
+                padding: 4px 8px;
+                border-radius: 6px;
+                font-size: 0.8rem;
+                font-family: "Roboto Mono", monospace;
+                border: 1px solid #4b5563;
+                white-space: nowrap;
+                opacity: 0;
+                animation: fadeInOut 5s forwards;
+                transform: translate(-50%, -50%);
+            }
+            .annotation-arrow {
+                position: absolute;
+                opacity: 0;
+                animation: fadeInOut 5s forwards;
+                stroke-width: 2;
+                fill: #f59e0b;
+            }
+            @keyframes fadeInOut {
+                0% {
+                    opacity: 0;
+                }
+                15% {
+                    opacity: 1;
+                }
+                85% {
+                    opacity: 1;
+                }
+                100% {
+                    opacity: 0;
+                }
+            }
+
+            /* Modal Styles */
+            .modal-overlay {
+                position: fixed;
+                inset: 0;
+                background-color: rgba(0, 0, 0, 0.75);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 50;
+                visibility: hidden;
+                opacity: 0;
+                transition: opacity 0.3s;
+            }
+            .modal-overlay.visible {
+                visibility: visible;
+                opacity: 1;
+            }
+            .modal-content {
+                background-color: #1f2937;
+                padding: 2rem;
+                border-radius: 0.75rem;
+                border: 1px solid #4b5563;
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+                width: 90%;
+                max-width: 500px;
+            }
+
+            /* Scrollbar styles */
+            ::-webkit-scrollbar {
+                width: 8px;
+            }
+            ::-webkit-scrollbar-track {
+                background: #1f2937;
+            }
+            ::-webkit-scrollbar-thumb {
+                background: #4b5563;
+                border-radius: 4px;
+            }
+            ::-webkit-scrollbar-thumb:hover {
+                background: #6b7280;
+            }
+        </style>
+    </head>
+
+    <body class="p-4 md:p-8">
+        <div id="annotation-layer"></div>
+
+        <div class="max-w-full mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Left Column: Registers & Stack -->
+            <div class="lg:col-span-1 flex flex-col gap-8">
+                <!-- Registers -->
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                    <h2 class="text-xl font-bold mb-4 text-gray-200">Registers</h2>
+                    <div id="registers-view" class="space-y-3">
+                        <!-- Register items will be injected here -->
+                    </div>
+                </div>
+
+                <!-- Stack -->
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                    <div class="flex justify-between items-center mb-3">
+                        <h2 class="text-xl font-bold text-gray-200">Stack</h2>
+                        <div class="flex gap-2">
+                            <button id="stack-up-btn" class="btn bg-gray-600 hover:bg-gray-500 p-1 rounded-md text-white">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                            <button id="stack-down-btn" class="btn bg-gray-600 hover:bg-gray-500 p-1 rounded-md text-white">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="stack-view" class="space-y-1 mono text-sm pr-4 h-96 overflow-y-auto">
+                        <!-- Stack items will be injected here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Controls & Memory -->
+            <div class="lg:col-span-2 flex flex-col gap-8">
+                <!-- Controls -->
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                    <h2 class="text-xl font-bold mb-4 text-gray-200">Controls</h2>
+                    <div class="flex flex-col sm:flex-row gap-3 items-center">
+                        <input type="text" id="instruction-input" class="mono w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g., LDAA #$FF" />
+                        <button id="execute-btn" class="btn w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">Execute</button>
+                        <button id="reset-btn" class="btn w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md">Reset</button>
+                    </div>
+                    <div class="mt-4">
+                        <label for="examples-select" class="text-sm font-medium text-gray-400 mr-2">Examples:</label>
+                        <select id="examples-select" class="mono bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm focus:outline-none">
+                            <option value="">Select an example...</option>
+                            <optgroup label="Inherent Addressing">
+                                <option value="INCA">INCA</option>
+                                <option value="DECB">DECB</option>
+                                <option value="INX">INX</option>
+                                <option value="RTS">RTS</option>
+                            </optgroup>
+                            <optgroup label="Immediate Addressing">
+                                <option value="LDAA #$42">LDAA #$42</option>
+                                <option value="LDX #$C0DE">LDX #$C0DE</option>
+                                <option value="SUBD #$0010">SUBD #$0010</option>
+                            </optgroup>
+                            <optgroup label="Direct Addressing">
+                                <option value="LDAA $30">LDAA $30</option>
+                                <option value="STAA $40">STAA $40</option>
+                            </optgroup>
+                            <optgroup label="Extended Addressing">
+                                <option value="LDD $1010">LDD $1010</option>
+                                <option value="STX $1020">STX $1020</option>
+                                <option value="JSR $2000">JSR $2000</option>
+                            </optgroup>
+                            <optgroup label="Indexed - Offset">
+                                <option value="LDAA 5,X">LDAA 5,X</option>
+                                <option value="LDAB -2,Y">LDAB -2,Y</option>
+                                <option value="LDD 4,SP">LDD 4,SP</option>
+                            </optgroup>
+                            <optgroup label="Indexed - Pre/Post-Increment/Decrement">
+                                <option value="STAA 2,X+">STAA 2,X+ (Post-Increment)</option>
+                                <option value="LDD 2,+X">LDD 2,+X (Pre-Increment)</option>
+                                <option value="LDAA 1,-SP">LDAA 1,-SP (Pre-Decrement)</option>
+                            </optgroup>
+                            <optgroup label="Indexed - Accumulator Offset">
+                                <option value="LDAA B,X">LDAA B,X</option>
+                                <option value="STAB D,Y">STAB D,Y</option>
+                            </optgroup>
+                            <optgroup label="Indexed-Indirect">
+                                <option value="LDAA [$10,X]">LDAA [$10,X]</option>
+                                <option value="LDD [D,Y]">LDD [D,Y]</option>
+                            </optgroup>
+                            <optgroup label="Stack Operations">
+                                <option value="PSHD">PSHD</option>
+                                <option value="PULD">PULD</option>
+                                <option value="LEAS -8,SP">LEAS -8,SP (Allocate)</option>
+                            </optgroup>
+                            <optgroup label="Register Transfer">
+                                <option value="TFR D,X">TFR D,X</option>
+                                <option value="TFR X,SP">TFR X,SP</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div id="log-message" class="mono text-sm mt-4 p-3 bg-gray-900 rounded-md h-12 text-green-400"></div>
+                </div>
+
+                <!-- Dual Memory Views -->
+                <div class="flex flex-col gap-8">
+                    <!-- Memory View 1 -->
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                        <div class="flex justify-between items-center mb-3">
+                            <h2 class="text-xl font-bold text-gray-200">Memory View A</h2>
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm">Go to: $</span>
+                                <input type="text" id="memory-goto-1" class="mono w-24 bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0000" />
+                            </div>
+                        </div>
+                        <div id="memory-view-1" class="grid grid-cols-9 gap-1 mono text-sm h-64 overflow-y-auto"></div>
+                    </div>
+                    <!-- Memory View 2 -->
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                        <div class="flex justify-between items-center mb-3">
+                            <h2 class="text-xl font-bold text-gray-200">Memory View B</h2>
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm">Go to: $</span>
+                                <input type="text" id="memory-goto-2" class="mono w-24 bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0000" />
+                            </div>
+                        </div>
+                        <div id="memory-view-2" class="grid grid-cols-9 gap-1 mono text-sm h-64 overflow-y-auto"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal for editing values -->
+        <div id="edit-modal" class="modal-overlay">
+            <div class="modal-content">
+                <h3 id="modal-title" class="text-lg font-bold mb-4">Edit Value</h3>
+                <input type="text" id="modal-input" class="mono w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <div class="flex justify-end gap-3">
+                    <button id="modal-cancel" class="btn bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-md">Cancel</button>
+                    <button id="modal-save" class="btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">Save</button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            // --- HCS12 CPU SIMULATOR CORE ---
+            class HCS12_CPU {
+                constructor() {
+                    this.memory = new Uint8Array(65536);
+                    this.registers = { A: 0, B: 0, X: 0, Y: 0, SP: 0, PC: 0, CCR: { S: 1, X: 0, H: 0, I: 1, N: 0, Z: 0, V: 0, C: 0 } };
+                    this.changed = { regs: new Set(), mem: new Set() };
+                    this.initInstructionSet();
+                }
+                get D() {
+                    return (this.registers.A << 8) | this.registers.B;
+                }
+                set D(value) {
+                    this.registers.A = (value >> 8) & 0xff;
+                    this.registers.B = value & 0xff;
+                }
+                reset() {
+                    let seed = 1;
+                    for (let i = 0; i < 65536; i++) {
+                        seed = (seed * 1664525 + 1013904223) & 0xffffffff;
+                        this.memory[i] = (seed >> 24) & 0xff;
+                    }
+                    this.registers = { A: 0xaa, B: 0xbb, X: 0x1000, Y: 0x2000, SP: 0x0fff, PC: 0x0100, CCR: { S: 1, X: 0, H: 0, I: 1, N: 0, Z: 0, V: 0, C: 0 } };
+                    this.writeMem(0x2000, 0x3d);
+                    this.writeMem16(0x1010, 0x3000); // For LDAA [$10,X]
+                    this.writeMem16(0x20aa, 0x4000); // For LDD [D,Y]
+                    this.changed = { regs: new Set(), mem: new Set() };
+                }
+                readMem(a) {
+                    return this.memory[a & 0xffff];
+                }
+                writeMem(a, v) {
+                    a &= 0xffff;
+                    this.memory[a] = v & 0xff;
+                    this.changed.mem.add(a);
+                }
+                readMem16(a) {
+                    return (this.readMem(a) << 8) | this.readMem(a + 1);
+                }
+                writeMem16(a, v) {
+                    this.writeMem(a, (v >> 8) & 0xff);
+                    this.writeMem(a + 1, v & 0xff);
+                }
+                push(v) {
+                    this.registers.SP--;
+                    this.writeMem(this.registers.SP, v & 0xff);
+                    this.changed.regs.add("SP");
+                }
+                push16(v) {
+                    this.push(v & 0xff);
+                    this.push((v >> 8) & 0xff);
+                }
+                pull() {
+                    const v = this.readMem(this.registers.SP);
+                    this.registers.SP++;
+                    this.changed.regs.add("SP");
+                    return v;
+                }
+                pull16() {
+                    const l = this.pull();
+                    const h = this.pull();
+                    return (h << 8) | l;
+                }
+                ccr_update_NZV0(v, s) {
+                    this.updateNZ(v, s);
+                    this.registers.CCR.V = 0;
+                }
+                ccr_update_NZV_DEC(v) {
+                    this.updateNZ(v, 8);
+                    this.registers.CCR.V = v === 0x7f ? 1 : 0;
+                }
+                ccr_update_NZV_INC(v) {
+                    this.registers.CCR.V = v === 0x80 ? 1 : 0;
+                    this.updateNZ(v, 8);
+                }
+                ccr_update_Z_only(v) {
+                    this.registers.CCR.Z = (v & 0xffff) === 0 ? 1 : 0;
+                }
+                ccr_update_SUB(v1, v2, res, s) {
+                    this.updateNZ(res, s);
+                    this.updateV_sub(v1, v2, res, s);
+                    this.updateC_sub(v1, v2);
+                }
+                ccr_update_TAP(v) {
+                    Object.keys(this.registers.CCR).forEach((f, i) => (this.registers.CCR[f] = v & (1 << i) ? 1 : 0));
+                }
+                ccr_update_PULC(v) {
+                    this.ccr_update_TAP(v);
+                }
+                ccr_update_None() {}
+                updateNZ(v, s = 8) {
+                    const m = s === 16 ? 0x8000 : 0x80,
+                        vm = s === 16 ? 0xffff : 0xff;
+                    this.registers.CCR.N = v & m ? 1 : 0;
+                    this.registers.CCR.Z = (v & vm) === 0 ? 1 : 0;
+                }
+                updateV_sub(v1, v2, r, s = 8) {
+                    const m = s === 16 ? 0x8000 : 0x80;
+                    this.registers.CCR.V = (v1 & m && !(v2 & m) && !(r & m)) || (!(v1 & m) && v2 & m && r & m) ? 1 : 0;
+                }
+                updateC_sub(v1, v2) {
+                    this.registers.CCR.C = v1 < v2 ? 1 : 0;
+                }
+
+                initInstructionSet() {
+                    const M = ["DIR", "EXT", "IDX_OFFSET", "IDX_ACC", "IDX_INDIRECT", "IDX_INCDEC"];
+                    const MI = ["IMM", ...M];
+                    const M_NOIMM = M.filter((m) => m !== "IMM");
+                    this.instructionSet = {
+                        LDD: { h: this.executeLoad, v: MI, s: 16, r: "D", c: this.ccr_update_NZV0 },
+                        LDAA: { h: this.executeLoad, v: MI, s: 8, r: "A", c: this.ccr_update_NZV0 },
+                        LDAB: { h: this.executeLoad, v: MI, s: 8, r: "B", c: this.ccr_update_NZV0 },
+                        LDX: { h: this.executeLoad, v: MI, s: 16, r: "X", c: this.ccr_update_NZV0 },
+                        LDY: { h: this.executeLoad, v: MI, s: 16, r: "Y", c: this.ccr_update_NZV0 },
+                        LDS: { h: this.executeLoad, v: MI, s: 16, r: "SP", c: this.ccr_update_NZV0 },
+                        STAA: { h: this.executeStore, v: M_NOIMM, s: 8, r: "A", c: this.ccr_update_NZV0 },
+                        STAB: { h: this.executeStore, v: M_NOIMM, s: 8, r: "B", c: this.ccr_update_NZV0 },
+                        STD: { h: this.executeStore, v: M_NOIMM, s: 16, r: "D", c: this.ccr_update_NZV0 },
+                        STX: { h: this.executeStore, v: M_NOIMM, s: 16, r: "X", c: this.ccr_update_NZV0 },
+                        STY: { h: this.executeStore, v: M_NOIMM, s: 16, r: "Y", c: this.ccr_update_NZV0 },
+                        STS: { h: this.executeStore, v: M_NOIMM, s: 16, r: "SP", c: this.ccr_update_NZV0 },
+                        DEC: { h: this.executeMemoryOp, op: (v) => v - 1, v: M_NOIMM, s: 8, c: this.ccr_update_NZV_DEC },
+                        DECA: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "A", c: this.ccr_update_NZV_DEC },
+                        DECB: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "B", c: this.ccr_update_NZV_DEC },
+                        DEX: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "X", c: this.ccr_update_Z_only },
+                        DEY: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "Y", c: this.ccr_update_Z_only },
+                        INC: { h: this.executeMemoryOp, op: (v) => v + 1, v: M_NOIMM, s: 8, c: this.ccr_update_NZV_INC },
+                        INCA: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "A", c: this.ccr_update_NZV_INC },
+                        INCB: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "B", c: this.ccr_update_NZV_INC },
+                        INX: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "X", c: this.ccr_update_Z_only },
+                        INY: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "Y", c: this.ccr_update_Z_only },
+                        LEAS: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "SP", c: this.ccr_update_None },
+                        LEAX: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "X", c: this.ccr_update_Z_only },
+                        LEAY: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "Y", c: this.ccr_update_Z_only },
+                        MOVB: { h: this.executeMove, v: ["MEM_TO_MEM", "IMM_TO_MEM"], s: 8, c: this.ccr_update_NZV0 },
+                        PSHA: { h: this.executePush, v: ["INH"], s: 8, r: "A", c: this.ccr_update_None },
+                        PSHB: { h: this.executePush, v: ["INH"], s: 8, r: "B", c: this.ccr_update_None },
+                        PSHC: { h: this.executePush, v: ["INH"], s: 8, r: "CCR", c: this.ccr_update_None },
+                        PSHD: { h: this.executePush, v: ["INH"], s: 16, r: "D", c: this.ccr_update_None },
+                        PSHX: { h: this.executePush, v: ["INH"], s: 16, r: "X", c: this.ccr_update_None },
+                        PSHY: { h: this.executePush, v: ["INH"], s: 16, r: "Y", c: this.ccr_update_None },
+                        PULA: { h: this.executePull, v: ["INH"], s: 8, r: "A", c: this.ccr_update_None },
+                        PULB: { h: this.executePull, v: ["INH"], s: 8, r: "B", c: this.ccr_update_None },
+                        PULC: { h: this.executePull, v: ["INH"], s: 8, r: "CCR", c: this.ccr_update_PULC },
+                        PULD: { h: this.executePull, v: ["INH"], s: 16, r: "D", c: this.ccr_update_None },
+                        PULX: { h: this.executePull, v: ["INH"], s: 16, r: "X", c: this.ccr_update_None },
+                        PULY: { h: this.executePull, v: ["INH"], s: 16, r: "Y", c: this.ccr_update_None },
+                        SUBD: { h: this.executeSubtract, v: MI, s: 16, r: "D", c: this.ccr_update_SUB },
+                        SUBA: { h: this.executeSubtract, v: MI, s: 8, r: "A", c: this.ccr_update_SUB },
+                        SUBB: { h: this.executeSubtract, v: MI, s: 8, r: "B", c: this.ccr_update_SUB },
+                        TAB: { h: this.executeTransfer, v: ["INH"], src: "A", dst: "B", c: this.ccr_update_NZV0 },
+                        TBA: { h: this.executeTransfer, v: ["INH"], src: "B", dst: "A", c: this.ccr_update_NZV0 },
+                        TAP: { h: this.executeTransfer, v: ["INH"], src: "A", dst: "CCR", c: this.ccr_update_TAP },
+                        TPA: { h: this.executeTransfer, v: ["INH"], src: "CCR", dst: "A", c: this.ccr_update_None },
+                        TFR: { h: this.executeTransfer, v: ["REG_TO_REG"], c: this.ccr_update_None },
+                        JSR: {
+                            h: (ctx) => {
+                                this.push16(this.registers.PC);
+                                this.registers.PC = ctx.operand.address;
+                                this.changed.regs.add("PC");
+                                return `Jumping to sub at $${ctx.operand.address.toString(16)}`;
+                            },
+                            v: ["EXT"],
+                            c: this.ccr_update_None,
+                        },
+                        RTS: {
+                            h: () => {
+                                this.registers.PC = this.pull16();
+                                this.changed.regs.add("PC");
+                                return `Returning to $${this.registers.PC.toString(16)}`;
+                            },
+                            v: ["INH"],
+                            c: this.ccr_update_None,
+                        },
+                    };
+                }
+                executeLoad(ctx) {
+                    const v = this.getValue(ctx.operand, ctx.spec.s);
+                    if (ctx.spec.r === "D") this.D = v.value;
+                    else this.registers[ctx.spec.r] = v.value;
+                    ctx.spec.c.call(this, v.value, ctx.spec.s);
+                    this.changed.regs.add(ctx.spec.r);
+                    if (ctx.spec.r === "D") this.changed.regs.add("A").add("B");
+                    return `Loaded 0x${v.value.toString(16)} from ${v.ea !== null ? "$" + v.ea.toString(16) : "immediate"} into ${ctx.spec.r}`;
+                }
+                executeStore(ctx) {
+                    const ea = this.getEffectiveAddress(ctx.operand);
+                    const v = ctx.spec.r === "D" ? this.D : this.registers[ctx.spec.r];
+                    if (ctx.spec.s === 16) this.writeMem16(ea, v);
+                    else this.writeMem(ea, v);
+                    ctx.spec.c.call(this, v, ctx.spec.s);
+                    return `Stored 0x${v.toString(16)} to $${ea.toString(16)}`;
+                }
+                executeRegisterOp(ctx) {
+                    const r = ctx.spec.r,
+                        i = r === "D" ? this.D : this.registers[r],
+                        res = ctx.spec.op(i);
+                    if (r === "D") this.D = res;
+                    else this.registers[r] = res & 0xffff;
+                    ctx.spec.c.call(this, this.registers[r]);
+                    this.changed.regs.add(r);
+                    if (r === "A" || r === "B") this.changed.regs.add("D");
+                    return `${ctx.mnemonic} on ${r}`;
+                }
+                executeMemoryOp(ctx) {
+                    const ea = this.getEffectiveAddress(ctx.operand),
+                        i = this.readMem(ea),
+                        res = ctx.spec.op(i) & 0xff;
+                    this.writeMem(ea, res);
+                    ctx.spec.c.call(this, res);
+                    return `${ctx.mnemonic} on memory at $${ea.toString(16)}`;
+                }
+                executeLea(ctx) {
+                    const ea = this.getEffectiveAddress(ctx.operand);
+                    this.registers[ctx.spec.r] = ea;
+                    ctx.spec.c.call(this, ea);
+                    this.changed.regs.add(ctx.spec.r);
+                    return `Loaded EA $${ea.toString(16)} into ${ctx.spec.r}`;
+                }
+                executePush(ctx) {
+                    let v;
+                    if (ctx.spec.r === "CCR") {
+                        v = this.getCCRValue();
+                    } else {
+                        v = ctx.spec.r === "D" ? this.D : this.registers[ctx.spec.r];
+                    }
+                    if (ctx.spec.s === 16) this.push16(v);
+                    else this.push(v);
+                    return `Pushed ${ctx.spec.r} (0x${v.toString(16)}) to stack`;
+                }
+                executePull(ctx) {
+                    const v = ctx.spec.s === 16 ? this.pull16() : this.pull();
+                    if (ctx.spec.r === "D") this.D = v;
+                    else if (ctx.spec.r === "CCR") ctx.spec.c.call(this, v);
+                    else this.registers[ctx.spec.r] = v;
+                    this.changed.regs.add(ctx.spec.r);
+                    if (ctx.spec.r === "D") this.changed.regs.add("A").add("B");
+                    if (ctx.spec.r === "CCR") Object.keys(this.registers.CCR).forEach((f) => this.changed.regs.add(f));
+                    return `Pulled 0x${v.toString(16)} into ${ctx.spec.r}`;
+                }
+                executeSubtract(ctx) {
+                    const v1 = ctx.spec.r === "D" ? this.D : this.registers[ctx.spec.r];
+                    const { value: v2 } = this.getValue(ctx.operand, ctx.spec.s);
+                    const res = v1 - v2;
+                    if (ctx.spec.r === "D") this.D = res;
+                    else this.registers[ctx.spec.r] = res;
+                    ctx.spec.c.call(this, v1, v2, res & 0xffff, ctx.spec.s);
+                    this.changed.regs.add(ctx.spec.r);
+                    if (ctx.spec.r === "D") this.changed.regs.add("A").add("B");
+                    return `${ctx.mnemonic}: ${v1.toString(16)} - ${v2.toString(16)} = ${res & (ctx.spec.s === 16 ? 0xffff : 0xff).toString(16)}`;
+                }
+                executeTransfer(ctx) {
+                    const sr = ctx.operand.src || ctx.spec.src,
+                        dr = ctx.operand.dst || ctx.spec.dst,
+                        sv = sr === "CCR" ? this.getCCRValue() : sr === "D" ? this.D : this.registers[sr];
+                    if (dr === "CCR") {
+                        ctx.spec.c.call(this, sv);
+                    } else if (dr === "D") {
+                        this.D = sv;
+                    } else {
+                        this.registers[dr] = sv & 0xffff;
+                    }
+                    this.changed.regs.add(dr);
+                    if (dr === "D" || dr === "A" || dr === "B") this.changed.regs.add("A").add("B").add("D");
+                    if (dr === "CCR") Object.keys(this.registers.CCR).forEach((f) => this.changed.regs.add(f));
+                    return `Transferred ${sr} to ${dr}`;
+                }
+                getCCRValue() {
+                    let v = 0;
+                    if (this.registers.CCR.S) v |= 128;
+                    if (this.registers.CCR.X) v |= 64;
+                    if (this.registers.CCR.H) v |= 32;
+                    if (this.registers.CCR.I) v |= 16;
+                    if (this.registers.CCR.N) v |= 8;
+                    if (this.registers.CCR.Z) v |= 4;
+                    if (this.registers.CCR.V) v |= 2;
+                    if (this.registers.CCR.C) v |= 1;
+                    return v;
+                }
+                executeMove(ctx) {
+                    const sv = this.getValue(ctx.operand.src, ctx.spec.s).value;
+                    const de = this.getEffectiveAddress(ctx.operand.dst);
+                    this.writeMem(de, sv);
+                    ctx.spec.c.call(this, sv, ctx.spec.s);
+                    return `Moved 0x${sv.toString(16)} to $${de.toString(16)}`;
+                }
+                parseOperand(m, s) {
+                    s = s.trim().toUpperCase();
+                    const p = s.split(",").map((s) => s.trim());
+                    if (p.length === 2) {
+                        if (m === "TFR") return { mode: "REG_TO_REG", src: p[0], dst: p[1] };
+                        if (m === "MOVB") return { mode: "MEM_TO_MEM", src: this.parseSingleOperand(p[0]), dst: this.parseSingleOperand(p[1]) };
+                    }
+                    return this.parseSingleOperand(s);
+                }
+                parseSingleOperand(s) {
+                    let m;
+                    if (s === "") return { mode: "INH" };
+                    m = s.match(/^\[\s*(\$?([0-9A-F]+)|[D])\s*,\s*([XYSP]{1,2})\s*\]$/);
+                    if (m) {
+                        const o = m[1],
+                            r = m[3],
+                            b = this.registers[r];
+                        let v,
+                            a = o === "D";
+                        v = a ? this.D : parseInt(o.replace("$", ""), 16);
+                        const p = (b + v) & 0xffff;
+                        return { mode: "IDX_INDIRECT", address: this.readMem16(p), reg: r, ptr_addr: p, offset: v, offsetAcc: a ? "D" : null };
+                    }
+                    m = s.match(/^#\$?([0-9A-F]+)$/);
+                    if (m) return { mode: "IMM", value: parseInt(m[1], 16) };
+                    m = s.match(/^([ABD]),([XYSP]{1,2})$/);
+                    if (m) {
+                        const a = m[1],
+                            r = m[2],
+                            o = a === "D" ? this.D : this.registers[a],
+                            b = this.registers[r];
+                        return { mode: "IDX_ACC", address: (b + o) & 0xffff, reg: r, acc: a };
+                    }
+                    m = s.match(/^(\d+),([+-]?)([XYSP]{1,2})([+-]?)$/);
+                    if (m && (m[2] || m[4])) {
+                        const v = parseInt(m[1]),
+                            p = m[2],
+                            r = m[3],
+                            o = m[4];
+                        let e = this.registers[r];
+                        if (p) {
+                            e = p === "+" ? (e + v) & 0xffff : (e - v) & 0xffff;
+                        }
+                        return { mode: "IDX_INCDEC", address: e, reg: r, val: v, pre: p, post: o };
+                    }
+                    m = s.match(/^(-?\d+),([XYSP]{1,2})$/);
+                    if (m) {
+                        const o = parseInt(m[1], 10);
+                        return { mode: "IDX_OFFSET", address: (this.registers[m[2]] + o) & 0xffff, reg: m[2], offset: o };
+                    }
+                    m = s.match(/^\$?([0-9A-F]+)$/);
+                    if (m) {
+                        const a = parseInt(m[1], 16);
+                        return { mode: a <= 0xff ? "DIR" : "EXT", address: a };
+                    }
+                    return { mode: "INVALID", error: `Unknown operand: ${s}` };
+                }
+                getEffectiveAddress(o) {
+                    if (o.address !== undefined) return o.address;
+                    throw new Error("Could not determine EA");
+                }
+                getValue(o, s) {
+                    switch (o.mode) {
+                        case "IMM":
+                            return { value: o.value, ea: null };
+                        default:
+                            const e = this.getEffectiveAddress(o);
+                            return { value: s === 16 ? this.readMem16(e) : this.readMem(e), ea: e };
+                    }
+                }
+                step(i) {
+                    this.changed = { regs: new Set(), mem: new Set() };
+                    const p = i.trim().split(/\s+/),
+                        m = p[0].toUpperCase(),
+                        os = p.slice(1).join(" ");
+                    try {
+                        const c = this.instructionSet[m];
+                        if (!c) throw new Error(`Unknown mnemonic: ${m}`);
+                        const o = this.parseOperand(m, os);
+                        if (o.mode === "INVALID") throw new Error(o.error);
+                        if (!c.v.some((v) => o.mode.startsWith(v))) throw new Error(`Invalid mode '${o.mode}' for ${m}`);
+                        if (o.pre) {
+                            if (o.pre === "+") this.registers[o.reg] = (this.registers[o.reg] + o.val) & 0xffff;
+                            if (o.pre === "-") this.registers[o.reg] = (this.registers[o.reg] - o.val) & 0xffff;
+                            this.changed.regs.add(o.reg);
+                        }
+                        const l = c.h.call(this, { mnemonic: m, spec: c, operand: o });
+                        if (o.post) {
+                            if (o.post === "+") this.registers[o.reg] = (this.registers[o.reg] + o.val) & 0xffff;
+                            if (o.post === "-") this.registers[o.reg] = (this.registers[o.reg] - o.val) & 0xffff;
+                            this.changed.regs.add(o.reg);
+                        }
+                        return { success: true, log: l, operand: o };
+                    } catch (e) {
+                        return { success: false, log: e.message };
+                    }
+                }
+            }
+
+            // --- UI & APPLICATION LOGIC ---
+            document.addEventListener("DOMContentLoaded", () => {
+                const cpu = new HCS12_CPU();
+                const ui = {
+                    reg: document.getElementById("registers-view"),
+                    mem1: document.getElementById("memory-view-1"),
+                    mem2: document.getElementById("memory-view-2"),
+                    stack: document.getElementById("stack-view"),
+                    instr: document.getElementById("instruction-input"),
+                    exec: document.getElementById("execute-btn"),
+                    reset: document.getElementById("reset-btn"),
+                    goto1: document.getElementById("memory-goto-1"),
+                    goto2: document.getElementById("memory-goto-2"),
+                    log: document.getElementById("log-message"),
+                    examples: document.getElementById("examples-select"),
+                    anno: document.getElementById("annotation-layer"),
+                    stackUp: document.getElementById("stack-up-btn"),
+                    stackDown: document.getElementById("stack-down-btn"),
+                    modal: document.getElementById("edit-modal"),
+                    modalTitle: document.getElementById("modal-title"),
+                    modalInput: document.getElementById("modal-input"),
+                    modalSave: document.getElementById("modal-save"),
+                    modalCancel: document.getElementById("modal-cancel"),
+                };
+                let editCtx = null,
+                    stackOffset = 0;
+                const REG_META = {
+                    PC: { n: "Program Counter", s: 16 },
+                    SP: { n: "Stack Pointer", s: 16 },
+                    X: { n: "Index Register X", s: 16 },
+                    Y: { n: "Index Register Y", s: 16 },
+                    D: { n: "Accumulator D", s: 16, v: true },
+                    A: { n: "Accumulator A", s: 8 },
+                    B: { n: "Accumulator B", s: 8 },
+                    CCR: { n: "Condition Codes", s: 8, c: true },
+                };
+
+                function renderRegisters() {
+                    ui.reg.innerHTML = "";
+                    Object.entries(REG_META).forEach(([rn, m]) => {
+                        const ch = cpu.changed.regs.has(rn),
+                            w = document.createElement("div");
+                        w.className = `register-item flex items-center justify-between p-2 rounded-md ${ch ? "highlight-change" : "bg-gray-700"}`;
+                        w.id = `reg-${rn}`;
+                        if (m.c) {
+                            const c = cpu.registers.CCR,
+                                f = ["S", "X", "H", "I", "N", "Z", "V", "C"],
+                                v = f.map((fl) => `<span class="${c[fl] ? "text-green-400" : "text-gray-500"}">${fl}</span>`).join("");
+                            w.innerHTML = `<div class="flex items-center gap-2"><span class="font-bold w-6">${rn}</span><span class="text-xs text-gray-400">${m.n}</span></div><div class="mono text-lg flex gap-1.5">${v}</div>`;
+                        } else {
+                            const v = m.v ? cpu.D : cpu.registers[rn],
+                                h = v
+                                    .toString(16)
+                                    .toUpperCase()
+                                    .padStart(m.s / 4, "0");
+                            w.innerHTML = `<div class="flex items-center gap-2"><span class="font-bold w-6">${rn}</span><span class="text-xs text-gray-400">${m.n}</span></div><div class="mono text-lg">$${h}</div>`;
+                            w.addEventListener("click", () => !m.v && openModal("register", rn, v, m.s));
+                        }
+                        ui.reg.appendChild(w);
+                    });
+                }
+                function renderMemory(view, startAddr) {
+                    view.innerHTML = "";
+                    let h = '<div class="font-bold text-center text-gray-500">Addr</div>';
+                    for (let i = 0; i < 8; i++) h += `<div class="font-bold text-center text-gray-500">+${i.toString(16).toUpperCase()}</div>`;
+                    view.insertAdjacentHTML("beforeend", h);
+                    for (let r = 0; r < 20; r++) {
+                        const b = startAddr + r * 8;
+                        if (b > 0xffff) break;
+                        const ac = document.createElement("div");
+                        ac.className = "text-gray-500 text-right pr-2 py-1 relative";
+                        ac.textContent = `$${b.toString(16).toUpperCase().padStart(4, "0")}`;
+                        ac.id = `mem-addr-${b}-${view.id}`;
+                        if (b <= cpu.registers.PC && cpu.registers.PC < b + 8) {
+                            ac.innerHTML += `<span class="pointer-text text-green-400">PC</span>`;
+                            ac.classList.add("highlight-pc");
+                        }
+                        if (b <= cpu.registers.SP && cpu.registers.SP < b + 8) {
+                            ac.innerHTML += `<span class="pointer-text text-purple-400">SP</span>`;
+                            ac.classList.add("highlight-sp");
+                        }
+                        view.appendChild(ac);
+                        for (let c = 0; c < 8; c++) {
+                            const ad = b + c,
+                                vc = document.createElement("div");
+                            vc.className = "memory-item-value text-center py-1 rounded-sm border border-gray-700";
+                            vc.id = `mem-${ad}-${view.id}`;
+                            vc.textContent = cpu.readMem(ad).toString(16).toUpperCase().padStart(2, "0");
+                            if (cpu.changed.mem.has(ad)) vc.classList.add("highlight-change");
+                            vc.addEventListener("click", () => openModal("memory", ad, cpu.readMem(ad), 8));
+                            view.appendChild(vc);
+                        }
+                    }
+                }
+                function renderStack() {
+                    ui.stack.innerHTML = "";
+                    const sp = cpu.registers.SP,
+                        sa = sp + stackOffset;
+                    for (let i = 0; i < 20; i++) {
+                        const a = sa - i;
+                        if (a < 0) break;
+                        const v = cpu.readMem(a),
+                            t = a === sp,
+                            it = document.createElement("div");
+                        it.className = `flex justify-between items-center relative ${t ? "bg-purple-900/50 rounded-l-md" : ""}`;
+                        it.innerHTML = `<span class="text-gray-500">$${a.toString(16).toUpperCase().padStart(4, "0")}:</span><span>${v.toString(16).toUpperCase().padStart(2, "0")}</span>${
+                            t ? '<span class="pointer-text text-purple-400 text-lg">&larr; SP</span>' : ""
+                        }`;
+                        ui.stack.insertBefore(it, ui.stack.firstChild);
+                    }
+                    ui.stackDown.disabled = sp + stackOffset >= 0x0fff;
+                }
+                function updateUI() {
+                    renderRegisters();
+                    renderMemory(ui.mem1, parseInt(ui.goto1.value, 16) || 0x1000);
+                    renderMemory(ui.mem2, parseInt(ui.goto2.value, 16) || 0x2000);
+                    renderStack();
+                }
+                function clearHighlights() {
+                    document.querySelectorAll(".highlight-change,.highlight-pointer-addr,.highlight-effective-addr").forEach((e) => e.classList.remove("highlight-change", "highlight-pointer-addr", "highlight-effective-addr"));
+                }
+                function createAnnotation(text, element) {
+                    if (!element) return;
+                    const r = element.getBoundingClientRect(),
+                        a = document.createElement("div");
+                    a.className = "annotation-text";
+                    a.textContent = text;
+                    a.style.left = `${r.left + window.scrollX + r.width / 2}px`;
+                    a.style.top = `${r.top + window.scrollY - 20}px`;
+                    ui.anno.appendChild(a);
+                    setTimeout(() => a.remove(), 5000);
+                }
+                function createArrow(f, t, c = "#f59e0b") {
+                    if (!f || !t) return;
+                    const fr = f.getBoundingClientRect(),
+                        tr = t.getBoundingClientRect();
+                    if (tr.width === 0 && tr.height === 0) return;
+                    const sx = fr.left + fr.width,
+                        sy = fr.top + fr.height / 2,
+                        ex = tr.left,
+                        ey = tr.top + tr.height / 2,
+                        svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                    svg.className = "annotation-arrow";
+                    svg.style.position = "absolute";
+                    svg.style.left = 0;
+                    svg.style.top = 0;
+                    svg.style.width = "100%";
+                    svg.style.height = "100%";
+                    svg.innerHTML = `<defs><marker id="arrowhead-${c.slice(1)}" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto" fill="${c}"><polygon points="0 0, 10 3.5, 0 7" /></marker></defs><line x1="${
+                        sx + window.scrollX
+                    }" y1="${sy + window.scrollY}" x2="${ex + window.scrollX}" y2="${ey + window.scrollY}" stroke="${c}" stroke-width="2" marker-end="url(#arrowhead-${c.slice(1)})" />`;
+                    ui.anno.appendChild(svg);
+                    setTimeout(() => svg.remove(), 5000);
+                }
+                function findVisibleElementById(baseId) {
+                    return document.getElementById(`${baseId}-memory-view-1`) || document.getElementById(`${baseId}-memory-view-2`);
+                }
+                function showExecutionFlow(o) {
+                    ui.anno.innerHTML = "";
+                    if (!o || !o.mode || o.mode === "INH" || o.mode === "IMM" || o.mode === "REG_TO_REG") return;
+                    setTimeout(() => {
+                        const ea = o.address || (o.dst ? o.dst.address : null);
+                        const ec = findVisibleElementById(ea);
+                        switch (o.mode) {
+                            case "IDX_INDIRECT": {
+                                const re = document.getElementById(`reg-${o.reg}`),
+                                    ae = o.offsetAcc ? document.getElementById(`reg-${o.offsetAcc}`) : null,
+                                    pc = findVisibleElementById(o.ptr_addr);
+                                createAnnotation(`Base: $${cpu.registers[o.reg].toString(16).toUpperCase()}`, re);
+                                if (ae) createAnnotation(`Offset: $${o.offset.toString(16).toUpperCase()}`, ae);
+                                if (pc) {
+                                    pc.classList.add("highlight-pointer-addr");
+                                    const p2 = findVisibleElementById(o.ptr_addr + 1);
+                                    if (p2) p2.classList.add("highlight-pointer-addr");
+                                    const pv = cpu.readMem16(o.ptr_addr);
+                                    createAnnotation(`Ptr: $${pv.toString(16).toUpperCase()}`, pc);
+                                }
+                                if (ec) {
+                                    ec.classList.add("highlight-effective-addr");
+                                    const ec2 = findVisibleElementById(ea + 1);
+                                    if (ec2) ec2.classList.add("highlight-effective-addr");
+                                    createAnnotation(`EA: $${ea.toString(16).toUpperCase()}`, ec);
+                                }
+                                if (re) createArrow(re, pc, "#60a5fa");
+                                if (ae) createArrow(ae, pc, "#60a5fa");
+                                if (pc) createArrow(pc, ec, "#f59e0b");
+                                break;
+                            }
+                            default: {
+                                const re = o.reg ? document.getElementById(`reg-${o.reg}`) : null,
+                                    ae = o.acc ? document.getElementById(`reg-${o.acc}`) : null;
+                                if (re) createArrow(re, ec);
+                                if (ae) createArrow(ae, ec);
+                                if (ec) createAnnotation(`EA: $${ea.toString(16).toUpperCase()}`, ec);
+                            }
+                        }
+                    }, 100);
+                }
+                function handleExecute() {
+                    const i = ui.instr.value;
+                    if (!i) return;
+                    clearHighlights();
+                    const r = cpu.step(i);
+                    ui.log.textContent = r.log;
+                    ui.log.style.color = r.success ? "#4ade80" : "#f87171";
+                    if (r.success) {
+                        let ta1 = null,
+                            ta2 = null;
+                        if (r.operand.mode === "MEM_TO_MEM") {
+                            ta1 = r.operand.src.address;
+                            ta2 = r.operand.dst.address;
+                        } else if (r.operand.ptr_addr !== undefined) {
+                            ta1 = r.operand.ptr_addr;
+                            ta2 = r.operand.address;
+                        } else if (r.operand.address !== undefined) {
+                            ta1 = r.operand.address;
+                        }
+                        if (ta1 !== null) {
+                            ui.goto1.value = (ta1 & 0xfff8).toString(16).padStart(4, "0");
+                        }
+                        if (ta2 !== null) {
+                            ui.goto2.value = (ta2 & 0xfff8).toString(16).padStart(4, "0");
+                        }
+                        updateUI();
+                        showExecutionFlow(r.operand);
+                    }
+                }
+
+                ui.exec.addEventListener("click", handleExecute);
+                ui.instr.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") handleExecute();
+                });
+                ui.reset.addEventListener("click", () => {
+                    cpu.reset();
+                    ui.log.textContent = "CPU reset.";
+                    ui.log.style.color = "#4ade80";
+                    ui.goto1.value = "1000";
+                    ui.goto2.value = "2000";
+                    stackOffset = 0;
+                    updateUI();
+                });
+                ui.goto1.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") updateUI();
+                });
+                ui.goto2.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") updateUI();
+                });
+                ui.examples.addEventListener("change", (e) => {
+                    if (e.target.value) ui.instr.value = e.target.value;
+                });
+                ui.stackUp.addEventListener("click", () => {
+                    stackOffset -= 8;
+                    renderStack();
+                });
+                ui.stackDown.addEventListener("click", () => {
+                    stackOffset += 8;
+                    renderStack();
+                });
+                function openModal(t, tg, v, s) {
+                    editCtx = { type: t, target: tg, size: s };
+                    ui.modalTitle.textContent = `Edit ${t} ${t === "register" ? tg : "$" + tg.toString(16).toUpperCase()}`;
+                    ui.modalInput.value = v.toString(16).toUpperCase();
+                    ui.modalInput.maxLength = s / 4;
+                    ui.modal.classList.add("visible");
+                    ui.modalInput.focus();
+                    ui.modalInput.select();
+                }
+                function closeModal() {
+                    ui.modal.classList.remove("visible");
+                    editCtx = null;
+                }
+                ui.modalSave.addEventListener("click", () => {
+                    if (!editCtx) return;
+                    const nv = parseInt(ui.modalInput.value, 16);
+                    if (isNaN(nv)) {
+                        return closeModal();
+                    }
+                    clearHighlights();
+                    cpu.changed = { regs: new Set(), mem: new Set() };
+                    if (editCtx.type === "register") {
+                        const rn = editCtx.target;
+                        if (rn === "D") {
+                            cpu.D = nv;
+                            cpu.changed.regs.add("A").add("B").add("D");
+                        } else if (rn !== "CCR") {
+                            cpu.registers[rn] = nv;
+                            cpu.changed.regs.add(rn);
+                        }
+                    } else if (editCtx.type === "memory") {
+                        cpu.writeMem(editCtx.target, nv);
+                    }
+                    updateUI();
+                    closeModal();
+                });
+                ui.modalInput.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") ui.modalSave.click();
+                    if (e.key === "Escape") closeModal();
+                });
+                ui.modalCancel.addEventListener("click", closeModal);
+                ui.modal.addEventListener("click", (e) => {
+                    if (e.target === ui.modal) closeModal();
+                });
+                ui.reset.click();
+            });
+        </script>
+    </body>
+</html>
