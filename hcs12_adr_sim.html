@@ -1,3 +1,4 @@
+<!-- Copyright (c) Leon Weigel, 2025 -->
 <!DOCTYPE html>
 <html lang="en">
     <head>
@@ -412,40 +413,52 @@
                 ccr_update_PULC(v) {
                     this.ccr_update_TAP(v);
                 }
-                ccr_update_NZV0(v, s) {
-                    this.updateNZ(v, s);
+
+                // CCR Update Main Functions
+                ccr_update_NZ(result, size) {
+                    const mask = size === 16 ? 0xffff : 0xff;
+                    const msb = size === 16 ? 0x8000 : 0x80;
+                    this.registers.CCR.N = result & msb ? 1 : 0;
+                    this.registers.CCR.Z = (result & mask) === 0 ? 1 : 0;
+                }
+                ccr_update_load_store(result, size) {
+                    this.ccr_update_NZ(result, size);
                     this.registers.CCR.V = 0;
                 }
-                ccr_update_NZV_DEC(v) {
-                    this.updateNZ(v, 8);
-                    this.registers.CCR.V = v === 0x7f ? 1 : 0;
+                ccr_update_logical(result, size) {
+                    this.ccr_update_load_store(result, size);
                 }
-                ccr_update_NZV_INC(v) {
-                    this.registers.CCR.V = v === 0x80 ? 1 : 0;
-                    this.updateNZ(v, 8);
+                ccr_update_add(val1, val2, size) {
+                    const mask = size === 16 ? 0xffff : 0xff;
+                    const msb = size === 16 ? 0x8000 : 0x80;
+                    const result = (val1 + val2) & mask;
+
+                    this.ccr_update_NZ(result, size);
+                    this.registers.CCR.V = (val1 & msb) === (val2 & msb) && (val1 & msb) !== (result & msb) ? 1 : 0;
+                    this.registers.CCR.C = val1 + val2 > mask ? 1 : 0;
+                    this.registers.CCR.H = ((val1 & 0x0f) + (val2 & 0x0f)) & 0x10 ? 1 : 0;
                 }
-                ccr_update_Z_only(v) {
-                    this.registers.CCR.Z = (v & 0xffff) === 0 ? 1 : 0;
+                ccr_update_sub(val1, val2, size) {
+                    const mask = size === 16 ? 0xffff : 0xff;
+                    const msb = size === 16 ? 0x8000 : 0x80;
+                    const result = (val1 - val2) & mask;
+                    this.ccr_update_NZ(result, size);
+                    this.registers.CCR.V = (val1 & msb) !== (val2 & msb) && (val2 & msb) === (result & msb) ? 1 : 0;
+                    this.registers.CCR.C = (val1 & mask) < (val2 & mask) ? 1 : 0;
                 }
-                ccr_update_SUB(v1, v2, res, s) {
-                    this.updateNZ(res, s);
-                    this.updateV_sub(v1, v2, res, s);
-                    this.updateC_sub(v1, v2, s);
+                ccr_update_inc(val, size) {
+                    const mask = size === 16 ? 0xffff : 0xff;
+                    const msb = size === 16 ? 0x8000 : 0x80;
+                    const result = (val + 1) & mask;
+                    this.ccr_update_NZ(result, size);
+                    this.registers.CCR.V = (val & msb) === msb - 1 ? 1 : 0;
                 }
-                ccr_update_None() {}
-                updateNZ(v, s = 8) {
-                    const m = s === 16 ? 0x8000 : 0x80,
-                        vm = s === 16 ? 0xffff : 0xff;
-                    this.registers.CCR.N = v & m ? 1 : 0;
-                    this.registers.CCR.Z = (v & vm) === 0 ? 1 : 0;
-                }
-                updateV_sub(v1, v2, r, s = 8) {
-                    const m = s === 16 ? 0x8000 : 0x80;
-                    this.registers.CCR.V = (v1 & m && !(v2 & m) && !(r & m)) || (!(v1 & m) && v2 & m && r & m) ? 1 : 0;
-                }
-                updateC_sub(v1, v2, s = 8) {
-                    const m = s === 16 ? 0x10000 : 0x100;
-                    this.registers.CCR.C = (v1 & (m - 1)) < (v2 & (m - 1)) ? 1 : 0;
+                ccr_update_dec(val, size) {
+                    const mask = size === 16 ? 0xffff : 0xff;
+                    const msb = size === 16 ? 0x8000 : 0x80;
+                    const result = (val - 1) & mask;
+                    this.ccr_update_NZ(result, size);
+                    this.registers.CCR.V = val === msb ? 1 : 0;
                 }
 
                 initInstructionSet() {
@@ -453,54 +466,104 @@
                     const MI = ["IMM", ...M];
                     const M_NOIMM = M.filter((m) => m !== "IMM");
                     this.instructionSet = {
-                        LDD: { h: this.executeLoad, v: MI, s: 16, r: "D", c: this.ccr_update_NZV0 },
-                        LDAA: { h: this.executeLoad, v: MI, s: 8, r: "A", c: this.ccr_update_NZV0 },
-                        LDAB: { h: this.executeLoad, v: MI, s: 8, r: "B", c: this.ccr_update_NZV0 },
-                        LDX: { h: this.executeLoad, v: MI, s: 16, r: "X", c: this.ccr_update_Z_only },
-                        LDY: { h: this.executeLoad, v: MI, s: 16, r: "Y", c: this.ccr_update_Z_only },
-                        LDS: { h: this.executeLoad, v: MI, s: 16, r: "SP", c: this.ccr_update_Z_only },
-                        STAA: { h: this.executeStore, v: M_NOIMM, s: 8, r: "A", c: this.ccr_update_NZV0 },
-                        STAB: { h: this.executeStore, v: M_NOIMM, s: 8, r: "B", c: this.ccr_update_NZV0 },
-                        STD: { h: this.executeStore, v: M_NOIMM, s: 16, r: "D", c: this.ccr_update_NZV0 },
-                        STX: { h: this.executeStore, v: M_NOIMM, s: 16, r: "X", c: this.ccr_update_NZV0 },
-                        STY: { h: this.executeStore, v: M_NOIMM, s: 16, r: "Y", c: this.ccr_update_NZV0 },
-                        STS: { h: this.executeStore, v: M_NOIMM, s: 16, r: "SP", c: this.ccr_update_NZV0 },
-                        DECA: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "A", s: 8, c: this.ccr_update_NZV_DEC },
-                        DECB: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "B", s: 8, c: this.ccr_update_NZV_DEC },
-                        DEX: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "X", s: 16, c: this.ccr_update_Z_only },
-                        DEY: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "Y", s: 16, c: this.ccr_update_Z_only },
-                        INCA: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "A", s: 8, c: this.ccr_update_NZV_INC },
-                        INCB: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "B", s: 8, c: this.ccr_update_NZV_INC },
-                        INX: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "X", s: 16, c: this.ccr_update_Z_only },
-                        INY: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "Y", s: 16, c: this.ccr_update_Z_only },
-                        LEAS: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "SP", c: this.ccr_update_None },
-                        LEAX: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "X", c: this.ccr_update_Z_only },
-                        LEAY: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "Y", c: this.ccr_update_Z_only },
-                        PSHA: { h: this.executePush, v: ["INH"], s: 8, r: "A", c: this.ccr_update_None },
-                        PSHB: { h: this.executePush, v: ["INH"], s: 8, r: "B", c: this.ccr_update_None },
-                        PSHC: { h: this.executePush, v: ["INH"], s: 8, r: "CCR", c: this.ccr_update_None },
-                        PSHD: { h: this.executePush, v: ["INH"], s: 16, r: "D", c: this.ccr_update_None },
-                        PSHX: { h: this.executePush, v: ["INH"], s: 16, r: "X", c: this.ccr_update_None },
-                        PSHY: { h: this.executePush, v: ["INH"], s: 16, r: "Y", c: this.ccr_update_None },
-                        PULA: { h: this.executePull, v: ["INH"], s: 8, r: "A", c: this.ccr_update_None },
-                        PULB: { h: this.executePull, v: ["INH"], s: 8, r: "B", c: this.ccr_update_None },
+                        LDD: { h: this.executeLoad, v: MI, s: 16, r: "D", c: this.ccr_update_load_store },
+                        LDAA: { h: this.executeLoad, v: MI, s: 8, r: "A", c: this.ccr_update_load_store },
+                        LDAB: { h: this.executeLoad, v: MI, s: 8, r: "B", c: this.ccr_update_load_store },
+                        LDX: { h: this.executeLoad, v: MI, s: 16, r: "X", c: this.ccr_update_load_store },
+                        LDY: { h: this.executeLoad, v: MI, s: 16, r: "Y", c: this.ccr_update_load_store },
+                        LDS: { h: this.executeLoad, v: MI, s: 16, r: "SP", c: this.ccr_update_load_store },
+                        STAA: { h: this.executeStore, v: M_NOIMM, s: 8, r: "A", c: this.ccr_update_load_store },
+                        STAB: { h: this.executeStore, v: M_NOIMM, s: 8, r: "B", c: this.ccr_update_load_store },
+                        STD: { h: this.executeStore, v: M_NOIMM, s: 16, r: "D", c: this.ccr_update_load_store },
+                        STX: { h: this.executeStore, v: M_NOIMM, s: 16, r: "X", c: this.ccr_update_load_store },
+                        STY: { h: this.executeStore, v: M_NOIMM, s: 16, r: "Y", c: this.ccr_update_load_store },
+                        STS: { h: this.executeStore, v: M_NOIMM, s: 16, r: "SP", c: this.ccr_update_load_store },
+                        DECA: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "A", s: 8, c: this.ccr_update_dec },
+                        DECB: { h: this.executeRegisterOp, op: (v) => v - 1, v: ["INH"], r: "B", s: 8, c: this.ccr_update_dec },
+                        DEX: {
+                            h: this.executeRegisterOp,
+                            op: (v) => v - 1,
+                            v: ["INH"],
+                            r: "X",
+                            s: 16,
+                            c: () => {
+                                this.registers.CCR.Z = this.registers.X === 0 ? 1 : 0;
+                            },
+                        },
+                        DEY: {
+                            h: this.executeRegisterOp,
+                            op: (v) => v - 1,
+                            v: ["INH"],
+                            r: "Y",
+                            s: 16,
+                            c: () => {
+                                this.registers.CCR.Z = this.registers.Y === 0 ? 1 : 0;
+                            },
+                        },
+                        INCA: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "A", s: 8, c: this.ccr_update_inc },
+                        INCB: { h: this.executeRegisterOp, op: (v) => v + 1, v: ["INH"], r: "B", s: 8, c: this.ccr_update_inc },
+                        INX: {
+                            h: this.executeRegisterOp,
+                            op: (v) => v + 1,
+                            v: ["INH"],
+                            r: "X",
+                            s: 16,
+                            c: () => {
+                                this.registers.CCR.Z = this.registers.X === 0 ? 1 : 0;
+                            },
+                        },
+                        INY: {
+                            h: this.executeRegisterOp,
+                            op: (v) => v + 1,
+                            v: ["INH"],
+                            r: "Y",
+                            s: 16,
+                            c: () => {
+                                this.registers.CCR.Z = this.registers.Y === 0 ? 1 : 0;
+                            },
+                        },
+                        LEAS: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "SP", c: () => {} },
+                        LEAX: {
+                            h: this.executeLea,
+                            v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"],
+                            r: "X",
+                            c: () => {
+                                this.ccr_update_NZ(this.registers.X, 16);
+                            },
+                        },
+                        LEAY: {
+                            h: this.executeLea,
+                            v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"],
+                            r: "Y",
+                            c: () => {
+                                this.ccr_update_NZ(this.registers.Y, 16);
+                            },
+                        },
+                        PSHA: { h: this.executePush, v: ["INH"], s: 8, r: "A", c: () => {} },
+                        PSHB: { h: this.executePush, v: ["INH"], s: 8, r: "B", c: () => {} },
+                        PSHC: { h: this.executePush, v: ["INH"], s: 8, r: "CCR", c: () => {} },
+                        PSHD: { h: this.executePush, v: ["INH"], s: 16, r: "D", c: () => {} },
+                        PSHX: { h: this.executePush, v: ["INH"], s: 16, r: "X", c: () => {} },
+                        PSHY: { h: this.executePush, v: ["INH"], s: 16, r: "Y", c: () => {} },
+                        PULA: { h: this.executePull, v: ["INH"], s: 8, r: "A", c: () => {} },
+                        PULB: { h: this.executePull, v: ["INH"], s: 8, r: "B", c: () => {} },
                         PULC: { h: this.executePull, v: ["INH"], s: 8, r: "CCR", c: this.ccr_update_PULC },
-                        PULD: { h: this.executePull, v: ["INH"], s: 16, r: "D", c: this.ccr_update_None },
-                        PULX: { h: this.executePull, v: ["INH"], s: 16, r: "X", c: this.ccr_update_None },
-                        PULY: { h: this.executePull, v: ["INH"], s: 16, r: "Y", c: this.ccr_update_None },
-                        SUBA: { h: this.executeSubtract, v: MI, s: 8, r: "A", c: this.ccr_update_SUB },
-                        SUBB: { h: this.executeSubtract, v: MI, s: 8, r: "B", c: this.ccr_update_SUB },
-                        SUBD: { h: this.executeSubtract, v: MI, s: 16, r: "D", c: this.ccr_update_SUB },
-                        TFR: { h: this.executeTransfer, v: ["REG_TO_REG"], c: this.ccr_update_None },
+                        PULD: { h: this.executePull, v: ["INH"], s: 16, r: "D", c: () => {} },
+                        PULX: { h: this.executePull, v: ["INH"], s: 16, r: "X", c: () => {} },
+                        PULY: { h: this.executePull, v: ["INH"], s: 16, r: "Y", c: () => {} },
+                        SUBA: { h: this.executeSubtract, v: MI, s: 8, r: "A", c: this.ccr_update_sub },
+                        SUBB: { h: this.executeSubtract, v: MI, s: 8, r: "B", c: this.ccr_update_sub },
+                        SUBD: { h: this.executeSubtract, v: MI, s: 16, r: "D", c: this.ccr_update_sub },
+                        TFR: { h: this.executeTransfer, v: ["REG_TO_REG"], c: () => {} },
                         JSR: {
                             h: (ctx) => {
-                                this.push16(this.registers.PC);
+                                this.push16(this.registers.PC + 2);
                                 this.registers.PC = ctx.operand.address;
                                 this.changed.regs.add("PC");
                                 return `Jumping to sub at $${toHexString(ctx.operand.address, 16)}`;
                             },
                             v: ["EXT", "DIR", "IDX"],
-                            c: this.ccr_update_None,
+                            c: () => {},
                         },
                         RTS: {
                             h: () => {
@@ -509,18 +572,18 @@
                                 return `Returning to $${toHexString(this.registers.PC, 16)}`;
                             },
                             v: ["INH"],
-                            c: this.ccr_update_None,
+                            c: () => {},
                         },
                     };
                 }
                 executeLoad(ctx) {
-                    const v = this.getValue(ctx.operand, ctx.spec.s);
-                    if (ctx.spec.r === "D") this.D = v.value;
-                    else this.registers[ctx.spec.r] = v.value;
-                    ctx.spec.c.call(this, v.value, ctx.spec.s);
+                    const { value, ea } = this.getValue(ctx.operand, ctx.spec.s);
+                    if (ctx.spec.r === "D") this.D = value;
+                    else this.registers[ctx.spec.r] = value;
+                    ctx.spec.c.call(this, value, ctx.spec.s);
                     this.changed.regs.add(ctx.spec.r);
                     if (ctx.spec.r === "D") this.changed.regs.add("A").add("B");
-                    return `Loaded 0x${toHexString(v.value, ctx.spec.s)} from ${v.ea !== null ? "$" + toHexString(v.ea, 16) : "immediate"} into ${ctx.spec.r}`;
+                    return `Loaded 0x${toHexString(value, ctx.spec.s)} from ${ea !== null ? "$" + toHexString(ea, 16) : "immediate"} into ${ctx.spec.r}`;
                 }
                 executeStore(ctx) {
                     const ea = this.getEffectiveAddress(ctx.operand);
@@ -534,45 +597,31 @@
                     const r = ctx.spec.r;
                     const i = r === "D" ? this.D : this.registers[r];
                     const res = ctx.spec.op(i);
-                    if (r === "D") {
-                        this.D = res;
-                    } else {
-                        this.registers[r] = res & (ctx.spec.s === 16 ? 0xffff : 0xff);
-                    }
-                    ctx.spec.c.call(this, r === "D" ? this.D : this.registers[r], ctx.spec.s);
+                    ctx.spec.c.call(this, i, ctx.spec.s);
+                    if (r === "D") this.D = res;
+                    else this.registers[r] = res & (ctx.spec.s === 16 ? 0xffff : 0xff);
                     this.changed.regs.add(r);
-                    if (r === "D" || r === "A" || r === "B") {
-                        this.changed.regs.add("A").add("B").add("D");
-                    }
+                    if (r === "D" || r === "A" || r === "B") this.changed.regs.add("A").add("B").add("D");
                     return `${ctx.mnemonic} on ${r}`;
                 }
                 executeLea(ctx) {
                     const ea = this.getEffectiveAddress(ctx.operand);
                     this.registers[ctx.spec.r] = ea;
-                    ctx.spec.c.call(this, ea);
+                    ctx.spec.c.call(this);
                     this.changed.regs.add(ctx.spec.r);
                     return `Loaded EA $${toHexString(ea, 16)} into ${ctx.spec.r}`;
                 }
                 executePush(ctx) {
-                    let v;
-                    if (ctx.spec.r === "CCR") {
-                        v = this.getCCRValue();
-                    } else {
-                        v = ctx.spec.r === "D" ? this.D : this.registers[ctx.spec.r];
-                    }
+                    let v = ctx.spec.r === "CCR" ? this.getCCRValue() : ctx.spec.r === "D" ? this.D : this.registers[ctx.spec.r];
                     if (ctx.spec.s === 16) this.push16(v);
                     else this.push(v);
                     return `Pushed ${ctx.spec.r} (0x${toHexString(v, ctx.spec.s)}) to stack`;
                 }
                 executePull(ctx) {
                     const v = ctx.spec.s === 16 ? this.pull16() : this.pull();
-                    if (ctx.spec.r === "D") {
-                        this.D = v;
-                    } else if (ctx.spec.r === "CCR") {
-                        this.ccr_update_PULC(v);
-                    } else {
-                        this.registers[ctx.spec.r] = v;
-                    }
+                    if (ctx.spec.r === "D") this.D = v;
+                    else if (ctx.spec.r === "CCR") this.ccr_update_PULC(v);
+                    else this.registers[ctx.spec.r] = v;
                     this.changed.regs.add(ctx.spec.r);
                     if (ctx.spec.r === "D") this.changed.regs.add("A").add("B");
                     if (ctx.spec.r === "CCR") Object.keys(this.registers.CCR).forEach((f) => this.changed.regs.add(f));
@@ -584,7 +633,7 @@
                     const res = v1 - v2;
                     if (ctx.spec.r === "D") this.D = res;
                     else this.registers[ctx.spec.r] = res;
-                    ctx.spec.c.call(this, v1, v2, res, ctx.spec.s);
+                    ctx.spec.c.call(this, v1, v2, ctx.spec.s);
                     this.changed.regs.add(ctx.spec.r);
                     if (ctx.spec.r === "D") this.changed.regs.add("A").add("B");
                     return `${ctx.mnemonic}: $${toHexString(v1, ctx.spec.s)} - $${toHexString(v2, ctx.spec.s)} = $${toHexString(res, ctx.spec.s)}`;
