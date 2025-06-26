@@ -40,12 +40,12 @@
                 background-color: #581c87; /* Purple 900 */
             }
             .highlight-pointer-addr {
-                background-color: #4338ca; /* Indigo 700 */
-                border-color: #4f46e5; /* Indigo 600 */
+                background-color: #4338ca !important; /* Indigo 700 */
+                border-color: #4f46e5 !important; /* Indigo 600 */
             }
             .highlight-effective-addr {
-                background-color: #be123c; /* Rose 700 */
-                border-color: #e11d48; /* Rose 600 */
+                background-color: #be123c !important; /* Rose 700 */
+                border-color: #e11d48 !important; /* Rose 600 */
             }
 
             .pointer-text {
@@ -71,11 +71,11 @@
             }
 
             #annotation-layer {
-                position: absolute;
+                position: fixed;
                 top: 0;
                 left: 0;
-                width: 100%;
-                height: 100%;
+                width: 100vw;
+                height: 100vh;
                 pointer-events: none;
                 overflow: hidden;
                 z-index: 10;
@@ -180,7 +180,8 @@
                 <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
                     <div class="flex justify-between items-center mb-3">
                         <h2 class="text-xl font-bold text-gray-200">Stack</h2>
-                        <div class="flex gap-2">
+                        <div class="flex gap-2 items-center">
+                            <button id="follow-sp-btn" class="btn text-white text-xs px-2 py-1 rounded-md">Follow SP</button>
                             <button id="stack-up-btn" class="btn bg-gray-600 hover:bg-gray-500 p-1 rounded-md text-white">
                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                                     <path fill-rule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clip-rule="evenodd" />
@@ -231,7 +232,7 @@
                             <optgroup label="Extended Addressing">
                                 <option value="LDD $1010">LDD $1010</option>
                                 <option value="STX $1020">STX $1020</option>
-                                <option value="JSR $2000">JSR $2000</option>
+                                <option value="JSR $C000">JSR $C000</option>
                             </optgroup>
                             <optgroup label="Indexed - Offset">
                                 <option value="LDAA 5,X">LDAA 5,X</option>
@@ -252,9 +253,16 @@
                                 <option value="LDD [D,Y]">LDD [D,Y]</option>
                             </optgroup>
                             <optgroup label="Stack Operations">
-                                <option value="PSHD">PSHD</option>
+                                <option value="PSHA">PSHA</option>
+                                <option value="PSHC">PSHC</option>
                                 <option value="PULD">PULD</option>
+                                <option value="PULY">PULY</option>
                                 <option value="LEAS -8,SP">LEAS -8,SP (Allocate)</option>
+                            </optgroup>
+                            <optgroup label="Subtract">
+                                <option value="SUBA #$10">SUBA #$10</option>
+                                <option value="SUBB $30">SUBB $30</option>
+                                <option value="SUBD $1010">SUBD $1010</option>
                             </optgroup>
                             <optgroup label="Register Transfer">
                                 <option value="TFR D,X">TFR D,X</option>
@@ -293,6 +301,10 @@
             </div>
         </div>
 
+        <footer class="text-center text-gray-500 mt-8 py-4">
+            <p>&copy; Leon Weigel, 2025</p>
+        </footer>
+
         <!-- Modal for editing values -->
         <div id="edit-modal" class="modal-overlay">
             <div class="modal-content">
@@ -306,10 +318,17 @@
         </div>
 
         <script>
+            // --- GLOBAL HELPER ---
+            function toHexString(val, size) {
+                let hex = (val & (Math.pow(2, size) - 1)).toString(16).toUpperCase();
+                return hex.padStart(size / 4, "0");
+            }
+
             // --- HCS12 CPU SIMULATOR CORE ---
             class HCS12_CPU {
                 constructor() {
                     this.memory = new Uint8Array(65536);
+                    // CCR flag order: S, X, H, I, N, Z, V, C
                     this.registers = { A: 0, B: 0, X: 0, Y: 0, SP: 0, PC: 0, CCR: { S: 1, X: 0, H: 0, I: 1, N: 0, Z: 0, V: 0, C: 0 } };
                     this.changed = { regs: new Set(), mem: new Set() };
                     this.initInstructionSet();
@@ -327,7 +346,8 @@
                         seed = (seed * 1664525 + 1013904223) & 0xffffffff;
                         this.memory[i] = (seed >> 24) & 0xff;
                     }
-                    this.registers = { A: 0xaa, B: 0xbb, X: 0x1000, Y: 0x2000, SP: 0x0fff, PC: 0x0100, CCR: { S: 1, X: 0, H: 0, I: 1, N: 0, Z: 0, V: 0, C: 0 } };
+                    // Realistic Memory Map Values
+                    this.registers = { A: 0xaa, B: 0xbb, X: 0x1000, Y: 0x2000, SP: 0x3fff, PC: 0xc000, CCR: { S: 1, X: 0, H: 0, I: 1, N: 0, Z: 0, V: 0, C: 0 } };
                     this.writeMem(0x0030, 0xbe);
                     this.writeMem16(0x1010, 0x3000); // For LDAA [$10,X]
                     this.writeMem16(0x3000, 0xcafe); // Value for LDAA [$10,X]
@@ -356,8 +376,8 @@
                     this.changed.regs.add("SP");
                 }
                 push16(v) {
-                    this.push(v & 0xff);
-                    this.push((v >> 8) & 0xff);
+                    this.push(v & 0xff); // Pushes Low byte first
+                    this.push((v >> 8) & 0xff); // Then High byte
                 }
                 pull() {
                     const v = this.readMem(this.registers.SP);
@@ -366,9 +386,31 @@
                     return v;
                 }
                 pull16() {
-                    const highByte = this.pull();
-                    const lowByte = this.pull();
+                    const highByte = this.pull(); // Pulls High byte first
+                    const lowByte = this.pull(); // Then Low byte
                     return (highByte << 8) | lowByte;
+                }
+                getCCRValue() {
+                    let v = 0;
+                    if (this.registers.CCR.S) v |= 1 << 7;
+                    if (this.registers.CCR.X) v |= 1 << 6;
+                    if (this.registers.CCR.H) v |= 1 << 5;
+                    if (this.registers.CCR.I) v |= 1 << 4;
+                    if (this.registers.CCR.N) v |= 1 << 3;
+                    if (this.registers.CCR.Z) v |= 1 << 2;
+                    if (this.registers.CCR.V) v |= 1 << 1;
+                    if (this.registers.CCR.C) v |= 1 << 0;
+                    return v;
+                }
+                ccr_update_TAP(v) {
+                    // Used for TFR A,CCR and PULC
+                    const flags = { S: 7, X: 6, H: 5, I: 4, N: 3, Z: 2, V: 1, C: 0 };
+                    Object.keys(flags).forEach((f) => {
+                        this.registers.CCR[f] = (v >> flags[f]) & 1;
+                    });
+                }
+                ccr_update_PULC(v) {
+                    this.ccr_update_TAP(v);
                 }
                 ccr_update_NZV0(v, s) {
                     this.updateNZ(v, s);
@@ -389,12 +431,6 @@
                     this.updateNZ(res, s);
                     this.updateV_sub(v1, v2, res, s);
                     this.updateC_sub(v1, v2, s);
-                }
-                ccr_update_TAP(v) {
-                    Object.keys(this.registers.CCR).forEach((f, i) => (this.registers.CCR[f] = v & (1 << i) ? 1 : 0));
-                }
-                ccr_update_PULC(v) {
-                    this.ccr_update_TAP(v);
                 }
                 ccr_update_None() {}
                 updateNZ(v, s = 8) {
@@ -440,8 +476,20 @@
                         LEAS: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "SP", c: this.ccr_update_None },
                         LEAX: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "X", c: this.ccr_update_Z_only },
                         LEAY: { h: this.executeLea, v: ["IDX_OFFSET", "IDX_ACC", "IDX_INCDEC"], r: "Y", c: this.ccr_update_Z_only },
+                        PSHA: { h: this.executePush, v: ["INH"], s: 8, r: "A", c: this.ccr_update_None },
+                        PSHB: { h: this.executePush, v: ["INH"], s: 8, r: "B", c: this.ccr_update_None },
+                        PSHC: { h: this.executePush, v: ["INH"], s: 8, r: "CCR", c: this.ccr_update_None },
                         PSHD: { h: this.executePush, v: ["INH"], s: 16, r: "D", c: this.ccr_update_None },
+                        PSHX: { h: this.executePush, v: ["INH"], s: 16, r: "X", c: this.ccr_update_None },
+                        PSHY: { h: this.executePush, v: ["INH"], s: 16, r: "Y", c: this.ccr_update_None },
+                        PULA: { h: this.executePull, v: ["INH"], s: 8, r: "A", c: this.ccr_update_None },
+                        PULB: { h: this.executePull, v: ["INH"], s: 8, r: "B", c: this.ccr_update_None },
+                        PULC: { h: this.executePull, v: ["INH"], s: 8, r: "CCR", c: this.ccr_update_PULC },
                         PULD: { h: this.executePull, v: ["INH"], s: 16, r: "D", c: this.ccr_update_None },
+                        PULX: { h: this.executePull, v: ["INH"], s: 16, r: "X", c: this.ccr_update_None },
+                        PULY: { h: this.executePull, v: ["INH"], s: 16, r: "Y", c: this.ccr_update_None },
+                        SUBA: { h: this.executeSubtract, v: MI, s: 8, r: "A", c: this.ccr_update_SUB },
+                        SUBB: { h: this.executeSubtract, v: MI, s: 8, r: "B", c: this.ccr_update_SUB },
                         SUBD: { h: this.executeSubtract, v: MI, s: 16, r: "D", c: this.ccr_update_SUB },
                         TFR: { h: this.executeTransfer, v: ["REG_TO_REG"], c: this.ccr_update_None },
                         JSR: {
@@ -449,16 +497,16 @@
                                 this.push16(this.registers.PC);
                                 this.registers.PC = ctx.operand.address;
                                 this.changed.regs.add("PC");
-                                return `Jumping to sub at $${ctx.operand.address.toString(16)}`;
+                                return `Jumping to sub at $${toHexString(ctx.operand.address, 16)}`;
                             },
-                            v: ["EXT"],
+                            v: ["EXT", "DIR", "IDX"],
                             c: this.ccr_update_None,
                         },
                         RTS: {
                             h: () => {
                                 this.registers.PC = this.pull16();
                                 this.changed.regs.add("PC");
-                                return `Returning to $${this.registers.PC.toString(16)}`;
+                                return `Returning to $${toHexString(this.registers.PC, 16)}`;
                             },
                             v: ["INH"],
                             c: this.ccr_update_None,
@@ -472,7 +520,7 @@
                     ctx.spec.c.call(this, v.value, ctx.spec.s);
                     this.changed.regs.add(ctx.spec.r);
                     if (ctx.spec.r === "D") this.changed.regs.add("A").add("B");
-                    return `Loaded 0x${v.value.toString(16)} from ${v.ea !== null ? "$" + v.ea.toString(16) : "immediate"} into ${ctx.spec.r}`;
+                    return `Loaded 0x${toHexString(v.value, ctx.spec.s)} from ${v.ea !== null ? "$" + toHexString(v.ea, 16) : "immediate"} into ${ctx.spec.r}`;
                 }
                 executeStore(ctx) {
                     const ea = this.getEffectiveAddress(ctx.operand);
@@ -480,7 +528,7 @@
                     if (ctx.spec.s === 16) this.writeMem16(ea, v);
                     else this.writeMem(ea, v);
                     ctx.spec.c.call(this, v, ctx.spec.s);
-                    return `Stored 0x${v.toString(16)} to $${ea.toString(16)}`;
+                    return `Stored 0x${toHexString(v, ctx.spec.s)} to $${toHexString(ea, 16)}`;
                 }
                 executeRegisterOp(ctx) {
                     const r = ctx.spec.r;
@@ -503,21 +551,32 @@
                     this.registers[ctx.spec.r] = ea;
                     ctx.spec.c.call(this, ea);
                     this.changed.regs.add(ctx.spec.r);
-                    return `Loaded EA $${ea.toString(16)} into ${ctx.spec.r}`;
+                    return `Loaded EA $${toHexString(ea, 16)} into ${ctx.spec.r}`;
                 }
                 executePush(ctx) {
-                    const v = ctx.spec.r === "D" ? this.D : this.registers[ctx.spec.r];
+                    let v;
+                    if (ctx.spec.r === "CCR") {
+                        v = this.getCCRValue();
+                    } else {
+                        v = ctx.spec.r === "D" ? this.D : this.registers[ctx.spec.r];
+                    }
                     if (ctx.spec.s === 16) this.push16(v);
                     else this.push(v);
-                    return `Pushed ${ctx.spec.r} (0x${v.toString(16)}) to stack`;
+                    return `Pushed ${ctx.spec.r} (0x${toHexString(v, ctx.spec.s)}) to stack`;
                 }
                 executePull(ctx) {
                     const v = ctx.spec.s === 16 ? this.pull16() : this.pull();
-                    if (ctx.spec.r === "D") this.D = v;
-                    else this.registers[ctx.spec.r] = v;
+                    if (ctx.spec.r === "D") {
+                        this.D = v;
+                    } else if (ctx.spec.r === "CCR") {
+                        this.ccr_update_PULC(v);
+                    } else {
+                        this.registers[ctx.spec.r] = v;
+                    }
                     this.changed.regs.add(ctx.spec.r);
                     if (ctx.spec.r === "D") this.changed.regs.add("A").add("B");
-                    return `Pulled 0x${v.toString(16)} into ${ctx.spec.r}`;
+                    if (ctx.spec.r === "CCR") Object.keys(this.registers.CCR).forEach((f) => this.changed.regs.add(f));
+                    return `Pulled 0x${toHexString(v, ctx.spec.s)} into ${ctx.spec.r}`;
                 }
                 executeSubtract(ctx) {
                     const v1 = ctx.spec.r === "D" ? this.D : this.registers[ctx.spec.r];
@@ -528,7 +587,7 @@
                     ctx.spec.c.call(this, v1, v2, res, ctx.spec.s);
                     this.changed.regs.add(ctx.spec.r);
                     if (ctx.spec.r === "D") this.changed.regs.add("A").add("B");
-                    return `${ctx.mnemonic}: ${v1.toString(16)} - ${v2.toString(16)} = ${res & (ctx.spec.s === 16 ? 0xffff : 0xff).toString(16)}`;
+                    return `${ctx.mnemonic}: $${toHexString(v1, ctx.spec.s)} - $${toHexString(v2, ctx.spec.s)} = $${toHexString(res, ctx.spec.s)}`;
                 }
                 executeTransfer(ctx) {
                     const sr = ctx.operand.src;
@@ -538,16 +597,17 @@
                     if (s_is_16 !== d_is_16 && sr !== "CCR" && dr !== "CCR") {
                         throw new Error(`Transfer size mismatch between ${sr} and ${dr}`);
                     }
-                    const sv = sr === "D" ? this.D : this.registers[sr];
-                    if (dr === "D") {
+                    const sv = sr === "CCR" ? this.getCCRValue() : sr === "D" ? this.D : this.registers[sr];
+                    if (dr === "CCR") {
+                        this.ccr_update_TAP(sv);
+                    } else if (dr === "D") {
                         this.D = sv;
                     } else {
                         this.registers[dr] = sv;
                     }
                     this.changed.regs.add(dr);
-                    if (dr === "D") {
-                        this.changed.regs.add("A").add("B");
-                    }
+                    if (dr === "D") this.changed.regs.add("A").add("B");
+                    if (dr === "CCR") Object.keys(this.registers.CCR).forEach((f) => this.changed.regs.add(f));
                     return `Transferred ${sr} to ${dr}`;
                 }
                 parseOperand(m, s) {
@@ -651,6 +711,7 @@
             // --- UI & APPLICATION LOGIC ---
             document.addEventListener("DOMContentLoaded", () => {
                 const cpu = new HCS12_CPU();
+                let followSP = true;
                 const ui = {
                     reg: document.getElementById("registers-view"),
                     mem1: document.getElementById("memory-view-1"),
@@ -671,6 +732,7 @@
                     modalInput: document.getElementById("modal-input"),
                     modalSave: document.getElementById("modal-save"),
                     modalCancel: document.getElementById("modal-cancel"),
+                    followSpBtn: document.getElementById("follow-sp-btn"),
                 };
                 let editCtx = null,
                     stackOffset = 0;
@@ -685,6 +747,19 @@
                     CCR: { n: "Condition Codes", s: 8, c: true },
                 };
 
+                function setFollowSP(isFollowing) {
+                    followSP = isFollowing;
+                    if (followSP) {
+                        ui.followSpBtn.classList.remove("bg-gray-600", "hover:bg-gray-500");
+                        ui.followSpBtn.classList.add("bg-green-600", "hover:bg-green-700");
+                        ui.followSpBtn.textContent = "Following SP";
+                    } else {
+                        ui.followSpBtn.classList.remove("bg-green-600", "hover:bg-green-700");
+                        ui.followSpBtn.classList.add("bg-gray-600", "hover:bg-gray-500");
+                        ui.followSpBtn.textContent = "Follow SP";
+                    }
+                }
+
                 function renderRegisters() {
                     ui.reg.innerHTML = "";
                     Object.entries(REG_META).forEach(([rn, m]) => {
@@ -698,11 +773,8 @@
                                 v = f.map((fl) => `<span class="${c[fl] ? "text-green-400 font-bold" : "text-gray-500"}">${fl}</span>`).join("");
                             w.innerHTML = `<div class="flex items-center gap-2"><span class="font-bold w-6">${rn}</span><span class="text-xs text-gray-400">${m.n}</span></div><div class="mono text-lg flex gap-1.5">${v}</div>`;
                         } else {
-                            const v = m.v ? cpu.D : cpu.registers[rn],
-                                h = v
-                                    .toString(16)
-                                    .toUpperCase()
-                                    .padStart(m.s / 4, "0");
+                            const v = m.v ? cpu.D : cpu.registers[rn];
+                            const h = toHexString(v, m.s);
                             w.innerHTML = `<div class="flex items-center gap-2"><span class="font-bold w-6">${rn}</span><span class="text-xs text-gray-400">${m.n}</span></div><div class="mono text-lg">$${h}</div>`;
                             w.addEventListener("click", () => !m.v && openModal("register", rn, v, m.s));
                         }
@@ -719,7 +791,7 @@
                         if (b > 0xffff) break;
                         const ac = document.createElement("div");
                         ac.className = "text-gray-500 text-right pr-2 py-1 relative";
-                        ac.textContent = `$${b.toString(16).toUpperCase().padStart(4, "0")}`;
+                        ac.textContent = `$${toHexString(b, 16)}`;
                         ac.id = `mem-addr-${b}-${view.id}`;
                         if (b <= cpu.registers.PC && cpu.registers.PC < b + 8) {
                             ac.innerHTML += `<span class="pointer-text text-green-400">PC</span>`;
@@ -735,7 +807,7 @@
                                 vc = document.createElement("div");
                             vc.className = "memory-item-value text-center py-1 rounded-sm border border-gray-700 bg-gray-900/50";
                             vc.id = `mem-${ad}-${view.id}`;
-                            vc.textContent = cpu.readMem(ad).toString(16).toUpperCase().padStart(2, "0");
+                            vc.textContent = toHexString(cpu.readMem(ad), 8);
                             if (cpu.changed.mem.has(ad)) vc.classList.add("highlight-change");
                             vc.addEventListener("click", () => openModal("memory", ad, cpu.readMem(ad), 8));
                             view.appendChild(vc);
@@ -745,20 +817,25 @@
                 function renderStack() {
                     ui.stack.innerHTML = "";
                     const sp = cpu.registers.SP,
-                        sa = sp + stackOffset;
-                    for (let i = 0; i < 20; i++) {
-                        const a = sa - i;
-                        if (a < 0) break;
-                        const v = cpu.readMem(a),
-                            t = a === sp,
-                            it = document.createElement("div");
-                        it.className = `flex justify-between items-center relative p-1 ${t ? "bg-purple-900/50 rounded-l-md" : ""}`;
-                        it.innerHTML = `<span class="text-gray-500">$${a.toString(16).toUpperCase().padStart(4, "0")}:</span><span>${v.toString(16).toUpperCase().padStart(2, "0")}</span>${
-                            t ? '<span class="pointer-text text-purple-400 text-lg">&larr; SP</span>' : ""
-                        }`;
-                        ui.stack.insertBefore(it, ui.stack.firstChild);
+                        sa = stackOffset;
+                    for (let i = -10; i < 10; i++) {
+                        const a = sa + i;
+                        if (a < 0 || a > 0xffff) continue;
+                        const v = cpu.readMem(a);
+                        const t = a === sp;
+                        const it = document.createElement("div");
+                        it.className = `flex justify-between items-center relative p-1`;
+                        if (t) it.classList.add("bg-purple-900/50", "rounded-l-md", "sp-marker");
+                        if (cpu.changed.mem.has(a)) it.classList.add("highlight-change");
+                        it.innerHTML = `<span class="text-gray-500">$${toHexString(a, 16)}:</span><span>${toHexString(v, 8)}</span>${t ? '<span class="pointer-text text-purple-400 text-lg">&larr; SP</span>' : ""}`;
+                        ui.stack.appendChild(it);
                     }
-                    ui.stackDown.disabled = sp + stackOffset >= 0xffff;
+                    const spMarker = ui.stack.querySelector(".sp-marker");
+                    if (spMarker) {
+                        spMarker.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                    ui.stackUp.disabled = sa <= 10;
+                    ui.stackDown.disabled = sa >= 0xfff5;
                 }
                 function updateUI() {
                     renderRegisters();
@@ -776,8 +853,8 @@
                         a = document.createElement("div");
                     a.className = "annotation-text";
                     a.textContent = text;
-                    a.style.left = `${r.left + window.scrollX + r.width / 2}px`;
-                    a.style.top = `${r.top + window.scrollY}px`;
+                    a.style.left = `${r.left + r.width / 2}px`;
+                    a.style.top = `${r.top}px`;
                     ui.anno.appendChild(a);
                     setTimeout(() => a.remove(), 5000);
                 }
@@ -800,9 +877,11 @@
                     svg.style.top = 0;
                     svg.style.width = "100%";
                     svg.style.height = "100%";
-                    svg.innerHTML = `<defs><marker id="arrowhead-${c.slice(1)}" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto" fill="${c}"><polygon points="0 0, 10 3.5, 0 7" /></marker></defs><line x1="${
-                        sx + window.scrollX
-                    }" y1="${sy + window.scrollY}" x2="${ex + window.scrollX - 5}" y2="${ey + window.scrollY}" stroke="${c}" stroke-width="2" marker-end="url(#arrowhead-${c.slice(1)})" />`;
+                    svg.innerHTML = `<defs><marker id="arrowhead-${c.slice(
+                        1
+                    )}" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto" fill="${c}"><polygon points="0 0, 10 3.5, 0 7" /></marker></defs><line x1="${sx}" y1="${sy}" x2="${
+                        ex - 5
+                    }" y2="${ey}" stroke="${c}" stroke-width="2" marker-end="url(#arrowhead-${c.slice(1)})" />`;
                     ui.anno.appendChild(svg);
                     setTimeout(() => svg.remove(), 5000);
                 }
@@ -811,7 +890,6 @@
                     return document.getElementById(`mem-${id}-memory-view-1`) || document.getElementById(`mem-${id}-memory-view-2`);
                 }
 
-                // --- REVISED VISUALIZATION LOGIC ---
                 function showExecutionFlow(r) {
                     ui.anno.innerHTML = "";
                     const o = r.operand;
@@ -839,8 +917,8 @@
                             const ptrEl = highlightAndGetElement(o.ptr_addr, "highlight-pointer-addr", 16);
                             const eaEl = highlightAndGetElement(ea, "highlight-effective-addr", r.spec.s);
 
-                            if (ptrEl) createAnnotation(`Ptr At: $${o.ptr_addr.toString(16).toUpperCase()}`, ptrEl);
-                            if (eaEl) createAnnotation(`EA: $${ea.toString(16).toUpperCase()}`, eaEl);
+                            if (ptrEl) createAnnotation(`Ptr At: $${toHexString(o.ptr_addr, 16)}`, ptrEl);
+                            if (eaEl) createAnnotation(`EA: $${toHexString(ea, 16)}`, eaEl);
 
                             if (fromRegEl) createArrow(fromRegEl, ptrEl, "#60a5fa");
                             if (fromOffsetAccEl) createArrow(fromOffsetAccEl, ptrEl, "#60a5fa");
@@ -849,7 +927,7 @@
                             // Handles DIR, EXT, IDX_OFFSET, IDX_ACC, IDX_INCDEC
                             const eaEl = highlightAndGetElement(ea, "highlight-effective-addr", r.spec.s);
 
-                            if (eaEl) createAnnotation(`EA: $${ea.toString(16).toUpperCase()}`, eaEl);
+                            if (eaEl) createAnnotation(`EA: $${toHexString(ea, 16)}`, eaEl);
 
                             if (fromRegEl) createArrow(fromRegEl, eaEl);
                             if (fromAccEl) createArrow(fromAccEl, eaEl);
@@ -864,24 +942,40 @@
                     const r = cpu.step(i);
                     ui.log.textContent = r.log;
                     ui.log.style.color = r.success ? "#4ade80" : "#f87171";
+
                     if (r.success) {
+                        if (followSP) {
+                            stackOffset = cpu.registers.SP;
+                        }
+
                         let ta1 = null,
                             ta2 = null;
+                        const isStackOp = ["PSHA", "PSHB", "PSHC", "PSHD", "PSHX", "PSHY", "PULA", "PULB", "PULC", "PULD", "PULX", "PULY", "JSR", "RTS", "LEAS"].includes(r.mnemonic);
+
                         if (r.operand.ptr_addr !== undefined) {
                             ta1 = r.operand.ptr_addr;
                             ta2 = r.operand.address;
                         } else if (r.operand.address !== undefined) {
                             ta1 = r.operand.address;
                         }
+
+                        if (isStackOp) {
+                            if (ta1 !== null) {
+                                ta2 = cpu.registers.SP;
+                            } else {
+                                ta1 = cpu.registers.SP;
+                            }
+                        }
+
                         if (ta1 !== null) {
-                            ui.goto1.value = (ta1 & 0xfff8).toString(16).padStart(4, "0");
+                            ui.goto1.value = toHexString(ta1 & 0xfff8, 16);
                         }
                         if (ta2 !== null) {
-                            ui.goto2.value = (ta2 & 0xfff8).toString(16).padStart(4, "0");
+                            ui.goto2.value = toHexString(ta2 & 0xfff8, 16);
                         }
 
                         updateUI();
-                        showExecutionFlow(r); // <-- Pass the whole result object
+                        showExecutionFlow(r);
                     }
                 }
 
@@ -893,9 +987,10 @@
                     cpu.reset();
                     ui.log.textContent = "CPU reset.";
                     ui.log.style.color = "#4ade80";
-                    ui.goto1.value = "1000";
-                    ui.goto2.value = "2000";
-                    stackOffset = 0;
+                    ui.goto1.value = "C000";
+                    ui.goto2.value = "3F00";
+                    setFollowSP(true);
+                    stackOffset = cpu.registers.SP;
                     updateUI();
                 });
                 ui.goto1.addEventListener("keydown", (e) => {
@@ -907,18 +1002,29 @@
                 ui.examples.addEventListener("change", (e) => {
                     if (e.target.value) ui.instr.value = e.target.value.split(" (")[0];
                 });
+
+                ui.followSpBtn.addEventListener("click", () => {
+                    setFollowSP(!followSP);
+                    if (followSP) {
+                        stackOffset = cpu.registers.SP;
+                        renderStack();
+                    }
+                });
                 ui.stackUp.addEventListener("click", () => {
+                    setFollowSP(false);
                     stackOffset -= 8;
                     renderStack();
                 });
                 ui.stackDown.addEventListener("click", () => {
-                    stackOffset = Math.min(0xffff - cpu.registers.SP, stackOffset + 8);
+                    setFollowSP(false);
+                    stackOffset += 8;
                     renderStack();
                 });
+
                 function openModal(t, tg, v, s) {
                     editCtx = { type: t, target: tg, size: s };
-                    ui.modalTitle.textContent = `Edit ${t} ${t === "register" ? tg : "$" + tg.toString(16).toUpperCase()}`;
-                    ui.modalInput.value = v.toString(16).toUpperCase();
+                    ui.modalTitle.textContent = `Edit ${t} ${t === "register" ? tg : "$" + toHexString(tg, 16)}`;
+                    ui.modalInput.value = toHexString(v, s);
                     ui.modalInput.maxLength = s / 4;
                     ui.modal.classList.add("visible");
                     ui.modalInput.focus();
